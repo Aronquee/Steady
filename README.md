@@ -1,6 +1,6 @@
 # Steady – Ferramenta Clínica para Avaliação de Tremor
 
-**Steady** é um sistema portátil de grau clínico para avaliação quantitativa do tremor. Combina um sensor vestível baseado em ESP32‑S3 com uma interface web autossuficiente, permitindo que médicos capturem, visualizem e analisem o tremor durante manobras padronizadas (repouso, postural, cinético).
+**Steady** é um sistema portátil para avaliação quantitativa do tremor. Combina um sensor vestível baseado em ESP32‑S3 com uma interface web autossuficiente, permitindo que médicos capturem, visualizem e analisem o tremor durante manobras padronizadas (repouso, postural, cinético).
 
 O dispositivo transmite dados de acelerômetro brutos e filtrados (passa‑banda) em tempo real via Wi‑Fi. O painel HTML incluído fornece gráficos ao vivo, controle de gravação e um relatório offline abrangente com métricas espectrais e interpretação clínica — tudo sem a necessidade de instalar qualquer software além de um navegador moderno.
 
@@ -59,8 +59,6 @@ O ESP32 atua como **front‑end de medição transparente** – não realiza cla
 | **`index.html`** | **Painel clínico – estrutura e design** (interface do usuário) |
 | **`script.js`** | **Lógica completa do painel** – conexão WebSocket, processamento de sinais, métricas, interpretação e banco de dados local |
 | `README.md` | Este documento |
-
-Não são necessários scripts Python externos – todo o pós‑processamento é executado dentro do navegador usando JavaScript e a biblioteca Chart.js.
 
 ---
 
