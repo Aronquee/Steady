@@ -1,0 +1,927 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>STEADY – Sistema de Análise de Tremor v1</title>
+
+    <!-- Chart.js, plugin de anotação e html2canvas -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js">
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js">
+    </script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js">
+    </script>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+    <style>
+        /* ESTILOS */
+        :root {
+            --bg: #F6F8FB;
+            --surface: #FFFFFF;
+            --surface-sunken: #F5F7FA;
+            --border: #E9EDF2;
+            --border-strong: #D7DEE6;
+            --radius: 22px;
+            --radius-sm: 16px;
+            --radius-pill: 999px;
+            --ink-900: #172230;
+            --ink-700: #3C4A59;
+            --ink-500: #6B7A8B;
+            --ink-400: #98A5B3;
+            --blue-700: #175D8C;
+            --blue-600: #1E7BAD;
+            --blue-500: #4FA8DA;
+            --blue-100: #E4F1F8;
+            --blue-50: #F1F8FC;
+            --red-600: #C43A44;
+            --red-500: #E0636B;
+            --red-100: #FBE7E8;
+            --red-50: #FDF3F3;
+            --gray-700: #4B5763;
+            --gray-500: #86929E;
+            --gray-200: #EAEEF2;
+            --gray-100: #F3F5F8;
+            --screen-bg: #12181F;
+            --screen-grid: #263140;
+            --screen-text: #93A6B8;
+            --shadow-sm: 0 2px 6px rgba(23, 34, 48, 0.05);
+            --shadow-md: 0 10px 28px rgba(23, 34, 48, 0.07);
+            --shadow-lg: 0 24px 56px -16px rgba(23, 34, 48, 0.20);
+            --text-muted: var(--ink-500);
+            --text-main: var(--ink-900);
+            --primary-blue: var(--blue-600);
+            --accent-red: var(--red-600);
+            --accent-green: var(--blue-500);
+            --accent-purple: var(--gray-700);
+            --accent-amber: var(--red-500);
+            --card-border: var(--border);
+            --card-bg: var(--surface);
+        }
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        body {
+            font-family: 'Inter', sans-serif;
+            background: radial-gradient(650px 380px at 12% -8%, rgba(79, 168, 218, 0.10), transparent 60%),
+                radial-gradient(600px 360px at 108% 8%, rgba(196, 58, 68, 0.06), transparent 60%),
+                var(--bg);
+            background-attachment: fixed;
+            color: var(--ink-900);
+            min-height: 100vh;
+            padding: 24px;
+            -webkit-font-smoothing: antialiased;
+        }
+        .mono {
+            font-family: 'IBM Plex Mono', monospace;
+        }
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        /* Modal */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(23, 34, 48, 0.45);
+            backdrop-filter: blur(8px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+            padding: 20px;
+            animation: fadeIn 0.3s ease;
+        }
+        .modal-overlay.hidden {
+            display: none;
+        }
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: scale(0.97);
+            }
+            to {
+                opacity: 1;
+                transform: scale(1);
+            }
+        }
+        .modal-card {
+            background: var(--surface);
+            border-radius: 28px;
+            max-width: 720px;
+            width: 100%;
+            max-height: 90vh;
+            overflow-y: auto;
+            padding: 36px 40px;
+            box-shadow: var(--shadow-lg);
+        }
+        .modal-card::-webkit-scrollbar {
+            width: 6px;
+        }
+        .modal-card::-webkit-scrollbar-track {
+            background: var(--surface-sunken);
+            border-radius: 8px;
+        }
+        .modal-card::-webkit-scrollbar-thumb {
+            background: var(--border-strong);
+            border-radius: 8px;
+        }
+        .modal-card h2 {
+            font-size: 24px;
+            font-weight: 800;
+            color: var(--ink-900);
+            margin-bottom: 4px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            letter-spacing: -0.3px;
+        }
+        .modal-card .subhead {
+            font-size: 14.5px;
+            color: var(--ink-500);
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 18px;
+            margin-bottom: 20px;
+        }
+        .modal-card h4 {
+            color: var(--blue-700);
+            font-size: 13px;
+            font-weight: 700;
+            margin-top: 22px;
+            margin-bottom: 8px;
+            letter-spacing: 0.2px;
+        }
+        .modal-card ul,
+        .modal-card .grid-metrics {
+            list-style: none;
+            padding: 0;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px 14px;
+            margin: 8px 0 12px 0;
+        }
+        .modal-card ul li,
+        .modal-card .grid-metrics li {
+            background: var(--surface-sunken);
+            padding: 12px 16px;
+            border-radius: var(--radius-sm);
+            font-size: 13.5px;
+            line-height: 1.5;
+            color: var(--ink-700);
+        }
+        .modal-card .grid-metrics li strong {
+            color: var(--blue-700);
+            display: block;
+            font-size: 14.5px;
+        }
+        .modal-card .grid-metrics li span {
+            color: var(--ink-500);
+            font-size: 13px;
+        }
+        .modal-card .steps {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin: 8px 0 4px 0;
+        }
+        .modal-card .steps .step-badge {
+            background: var(--surface-sunken);
+            padding: 7px 16px;
+            border-radius: var(--radius-pill);
+            font-size: 13px;
+            border: none;
+            color: var(--ink-500);
+        }
+        .modal-card .steps .step-badge strong {
+            color: var(--blue-700);
+        }
+        .modal-card .disclaimer {
+            background: var(--red-50);
+            border-left: 3px solid var(--red-500);
+            padding: 14px 18px;
+            border-radius: var(--radius-sm);
+            font-size: 13px;
+            color: var(--ink-700);
+            margin-top: 20px;
+        }
+        .modal-card .btn-close-modal {
+            background: var(--blue-700);
+            color: #fff;
+            border: none;
+            padding: 14px 28px;
+            border-radius: var(--radius-pill);
+            font-weight: 700;
+            font-size: 15px;
+            cursor: pointer;
+            margin-top: 24px;
+            width: 100%;
+            transition: all 0.15s ease;
+        }
+        .modal-card .btn-close-modal:hover {
+            background: var(--blue-600);
+        }
+        @media (max-width: 600px) {
+            .modal-card {
+                padding: 26px 20px;
+            }
+            .modal-card ul,
+            .modal-card .grid-metrics {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* Header e demais */
+        header {
+            background: var(--surface);
+            border-radius: var(--radius);
+            padding: 14px 22px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 16px;
+            box-shadow: var(--shadow-sm);
+        }
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .brand-mark {
+            width: 42px;
+            height: 42px;
+            border-radius: 14px;
+            background: linear-gradient(155deg, var(--blue-600), var(--blue-500));
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            box-shadow: 0 6px 14px -4px rgba(30, 123, 173, 0.45);
+        }
+        .brand-mark svg {
+            width: 24px;
+            height: 24px;
+        }
+        .brand-text {
+            display: flex;
+            flex-direction: column;
+            line-height: 1.2;
+        }
+        .brand h1 {
+            font-size: 20px;
+            color: var(--ink-900);
+            font-weight: 800;
+            letter-spacing: -0.3px;
+        }
+        .brand small {
+            color: var(--ink-500);
+            font-size: 12.5px;
+            font-weight: 500;
+        }
+        .patient-bar {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .patient-bar label {
+            font-size: 12.5px;
+            color: var(--ink-500);
+            font-weight: 600;
+        }
+        input,
+        select {
+            background: var(--surface-sunken);
+            border: 1px solid transparent;
+            color: var(--ink-900);
+            padding: 9px 15px;
+            border-radius: var(--radius-pill);
+            outline: none;
+            font-size: 13.5px;
+            font-family: inherit;
+        }
+        input:focus,
+        select:focus {
+            border-color: var(--blue-500);
+            box-shadow: 0 0 0 4px var(--blue-100);
+            background: var(--surface);
+        }
+        .status-badge {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            border-radius: var(--radius-pill);
+            background: var(--surface-sunken);
+            font-size: 12.5px;
+            font-weight: 600;
+            color: var(--ink-700);
+        }
+        .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--red-500);
+        }
+        .dot.connected {
+            background: var(--blue-500);
+            box-shadow: 0 0 0 4px var(--blue-100);
+        }
+        button {
+            background: var(--blue-700);
+            color: #fff;
+            border: none;
+            padding: 10px 20px;
+            border-radius: var(--radius-pill);
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            font-size: 13.5px;
+            font-family: inherit;
+        }
+        button:hover {
+            background: var(--blue-600);
+            box-shadow: 0 6px 16px -6px rgba(30, 123, 173, 0.5);
+        }
+        button:active {
+            transform: scale(0.98);
+        }
+        button:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+            box-shadow: none;
+            transform: none;
+        }
+        .btn-danger {
+            background: var(--red-600);
+            color: #fff;
+        }
+        .btn-danger:hover {
+            background: var(--red-500);
+            box-shadow: 0 6px 16px -6px rgba(196, 58, 68, 0.5);
+        }
+        .btn-secondary {
+            background: var(--gray-100);
+            color: var(--ink-700);
+        }
+        .btn-secondary:hover {
+            background: var(--gray-200);
+            box-shadow: none;
+        }
+        .btn-success {
+            background: var(--blue-600);
+            color: #fff;
+        }
+        .btn-success:hover {
+            background: var(--blue-500);
+        }
+        .btn-amber {
+            background: var(--gray-700);
+            color: #fff;
+        }
+        .btn-amber:hover {
+            background: var(--ink-700);
+        }
+        .nav-tabs {
+            display: flex;
+            gap: 2px;
+            background: var(--gray-100);
+            border-radius: var(--radius-pill);
+            padding: 4px;
+            border-bottom: none;
+            flex-wrap: wrap;
+            width: fit-content;
+        }
+        .tab-btn {
+            background: transparent;
+            color: var(--ink-500);
+            font-size: 13.5px;
+            font-weight: 600;
+            border-radius: var(--radius-pill);
+            padding: 9px 18px;
+            box-shadow: none;
+        }
+        .tab-btn:hover {
+            background: transparent;
+            color: var(--ink-700);
+            box-shadow: none;
+        }
+        .tab-btn.active {
+            background: var(--surface);
+            color: var(--blue-700);
+            box-shadow: var(--shadow-sm);
+        }
+        .tab-btn.active:hover {
+            background: var(--surface);
+        }
+        .grid-4 {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 16px;
+        }
+        .grid-2 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        .grid-3 {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 16px;
+        }
+        .card {
+            background: var(--surface);
+            border: none;
+            border-radius: var(--radius);
+            padding: 22px;
+            box-shadow: var(--shadow-sm);
+        }
+        .card-title {
+            font-size: 12.5px;
+            color: var(--ink-500);
+            font-weight: 600;
+            margin-bottom: 10px;
+        }
+        .metric-val {
+            font-size: 30px;
+            font-weight: 800;
+            color: var(--ink-900);
+            letter-spacing: -0.6px;
+        }
+        .metric-sub {
+            font-size: 12px;
+            color: var(--ink-500);
+            margin-top: 4px;
+        }
+        .metric-row {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            margin-top: 2px;
+        }
+        .ring {
+            --pct: 0;
+            --ring-color: var(--blue-500);
+            --ring-hole: var(--surface);
+            width: 54px;
+            height: 54px;
+            border-radius: 50%;
+            background: conic-gradient(var(--ring-color) calc(var(--pct) * 1%), var(--gray-200) 0);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            transition: background 0.5s ease;
+        }
+        .ring.ring-sm {
+            width: 40px;
+            height: 40px;
+        }
+        .ring-hole {
+            width: 68%;
+            height: 68%;
+            border-radius: 50%;
+            background: var(--ring-hole);
+        }
+        .chart-container {
+            position: relative;
+            height: 280px;
+            width: 100%;
+            background: var(--surface-sunken);
+            border-radius: var(--radius-sm);
+            padding: 10px;
+        }
+        .chart-container.tall {
+            height: 340px;
+        }
+        .chart-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .chart-header h3 {
+            font-size: 14.5px;
+            font-weight: 700;
+            color: var(--ink-900);
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 12px;
+        }
+        th,
+        td {
+            text-align: left;
+            padding: 12px;
+            border-bottom: 1px solid var(--border);
+            font-size: 13.5px;
+            color: var(--ink-700);
+        }
+        th {
+            color: var(--ink-500);
+            font-weight: 700;
+            font-size: 11.5px;
+            text-transform: uppercase;
+            letter-spacing: 0.4px;
+            background: transparent;
+        }
+        tr:hover {
+            background: var(--surface-sunken);
+        }
+        .rec-pulse {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            background: var(--red-600);
+            border-radius: 50%;
+            animation: pulse 1.2s infinite;
+        }
+        @keyframes pulse {
+            0% {
+                opacity: 1;
+            }
+            50% {
+                opacity: 0.3;
+            }
+            100% {
+                opacity: 1;
+            }
+        }
+        .hidden {
+            display: none !important;
+        }
+        .interpret-box {
+            background: var(--blue-50);
+            padding: 18px 22px;
+            border-radius: var(--radius-sm);
+            margin-top: 12px;
+        }
+        .interpret-box strong {
+            color: var(--blue-700);
+        }
+        .badge-clinical {
+            display: inline-block;
+            padding: 4px 13px;
+            border-radius: var(--radius-pill);
+            font-size: 11.5px;
+            font-weight: 700;
+        }
+        .badge-mild {
+            background: var(--blue-100);
+            color: var(--blue-700);
+        }
+        .badge-moderate {
+            background: var(--gray-200);
+            color: var(--gray-700);
+        }
+        .badge-severe {
+            background: var(--red-100);
+            color: var(--red-600);
+        }
+        .spectro-wrapper {
+            background: var(--screen-bg);
+            border-radius: var(--radius-sm);
+            padding: 10px;
+            position: relative;
+            margin-top: 8px;
+            height: 260px;
+        }
+        .spectro-wrapper canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+            border-radius: 8px;
+        }
+        .spectro-legend {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            justify-content: flex-end;
+            margin-top: 8px;
+            font-size: 12px;
+            color: var(--ink-500);
+        }
+        .spectro-legend .colorbar {
+            width: 120px;
+            height: 10px;
+            border-radius: var(--radius-pill);
+            background: linear-gradient(to right, #0a1628, #1a3a6b, #2a7fb0, #6eb5d9, #f0c27f);
+        }
+        @media (max-width: 900px) {
+            .grid-2,
+            .grid-3 {
+                grid-template-columns: 1fr;
+            }
+            header {
+                flex-direction: column;
+                align-items: stretch;
+            }
+            .patient-bar {
+                flex-wrap: wrap;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- ===== MODAL DE ONBOARDING ===== -->
+    <div id="onboardingModal" class="modal-overlay">
+        <div class="modal-card">
+            <h2>
+                <svg width="26" height="26" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M2 12h3l2-7 4 14 3-10 2 6h6" stroke="#1E7BAD" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                Bem-vindo ao STEADY
+            </h2>
+            <div class="subhead">Sistema de análise quantitativa de tremor para auxílio diagnóstico</div>
+            <h4>📋 Fluxo de trabalho</h4>
+            <div class="steps">
+                <span class="step-badge"><strong>1.</strong> Conectar ao sensor (IP)</span>
+                <span class="step-badge"><strong>2.</strong> Configurar paciente, tarefa e lado</span>
+                <span class="step-badge"><strong>3.</strong> Iniciar gravação e realizar a manobra</span>
+                <span class="step-badge"><strong>4.</strong> Parar e analisar o relatório espectral</span>
+                <span class="step-badge"><strong>5.</strong> Comparar com sessões anteriores</span>
+            </div>
+            <h4>📊 Principais métricas</h4>
+            <ul class="grid-metrics">
+                <li><strong>RMS (g)</strong><span>Amplitude global do tremor (3–12 Hz).</span></li>
+                <li><strong>ENMO (g)</strong><span>Intensidade do movimento global.</span></li>
+                <li><strong>Frequência Dominante (Hz)</strong><span>Pico espectral; 3,5–6,5 Hz → parkinsoniano; 6,5–12 Hz → essencial.</span></li>
+                <li><strong>Potência Relativa 3–8 Hz (%)</strong><span>Especificidade parkinsoniana.</span></li>
+                <li><strong>Centroide Espectral (Hz)</strong><span>Centro de massa da distribuição.</span></li>
+                <li><strong>Razão Harmônica</strong><span>&gt; 1,8 sugere oscilação sinusoidal pura.</span></li>
+                <li><strong>Variabilidade de Amplitude (%)</strong><span>&gt; 40% → tremor intermitente.</span></li>
+                <li><strong>Tremor‑ativo (%)</strong><span>Percentual acima do limiar.</span></li>
+            </ul>
+            <h4>🧭 Interpretação integrada</h4>
+            <p style="font-size:14px; color: var(--text-muted);">Classifica o padrão como parkinsoniano, tremor essencial, atípico ou baixa amplitude, com gravidade (leve, moderada, grave).</p>
+            <div class="disclaimer">⚠️ <strong>Nota clínica:</strong> Ferramenta auxiliar. Decisões são de responsabilidade do médico.</div>
+            <button class="btn-close-modal" id="closeOnboardingBtn">Entendi. Iniciar o sistema →</button>
+        </div>
+    </div>
+
+    <!-- ===== CONTEÚDO PRINCIPAL ===== -->
+    <div class="container">
+
+        <!-- HEADER -->
+        <header>
+            <div class="brand">
+                <div class="brand-mark">
+                    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M2 12h3l2-7 4 14 3-10 2 6h6" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </div>
+                <div class="brand-text">
+                    <h1>STEADY</h1>
+                    <small>Sistema de Análise de Tremor &middot; v2.6</small>
+                </div>
+            </div>
+            <div class="patient-bar">
+                <label>Paciente:</label>
+                <input type="text" id="patientId" value="PACIENTE-001" style="width:130px;" />
+                <label>Tarefa:</label>
+                <select id="taskSelect">
+                    <option value="Rest">Tremor de Repouso</option>
+                    <option value="Postural" selected>Tremor Postural</option>
+                    <option value="Kinetic">Tremor Cinético</option>
+                    <option value="Intentional">Ação Intencional</option>
+                </select>
+                <label>Lado:</label>
+                <select id="sideSelect">
+                    <option value="Right">Direito</option>
+                    <option value="Left">Esquerdo</option>
+                </select>
+            </div>
+            <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+                <div class="status-badge">
+                    <div class="dot" id="statusDot"></div>
+                    <span id="statusText">Desconectado</span>
+                </div>
+                <input type="text" id="ipInput" value="192.168.0.140" style="width:110px;" />
+                <button onclick="connectWS()" id="connectBtn">Conectar</button>
+            </div>
+        </header>
+
+        <!-- CONTROLES + NAV -->
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;">
+            <div class="nav-tabs">
+                <button class="tab-btn active" onclick="switchTab('live')">1. Monitor ao Vivo</button>
+                <button class="tab-btn" onclick="switchTab('report')">2. Análise da Sessão</button>
+                <button class="tab-btn" onclick="switchTab('compare')">3. Banco de Dados e Comparação</button>
+            </div>
+            <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+                <span id="recTimer" style="font-size:18px;font-weight:700;color:var(--accent-red);" class="hidden">
+                    <span class="rec-pulse"></span> 00:00
+                </span>
+                <button class="btn-danger" id="startBtn" onclick="startRecording()" disabled>Iniciar Gravação</button>
+                <button class="btn-secondary" id="stopBtn" onclick="stopRecording()" disabled>Parar</button>
+                <button class="btn-amber" onclick="exportReportImage()" id="exportBtn" disabled>Exportar PNG</button>
+            </div>
+        </div>
+
+        <!-- TAB 1: LIVE -->
+        <div id="tab-live" class="tab-content">
+            <div class="grid-4" style="margin-bottom:20px;">
+                <div class="card metric-card">
+                    <div class="card-title">Tremor RMS (3–12 Hz)</div>
+                    <div class="metric-row">
+                        <div class="ring" id="liveRMSRing" style="--pct:0; --ring-color:var(--blue-500);">
+                            <div class="ring-hole"></div>
+                        </div>
+                        <div>
+                            <div class="metric-val" id="liveRMS">0,000 <span style="font-size:15px;">g</span></div>
+                            <div class="metric-sub">Amplitude limitada em banda</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="card">
+                    <div class="card-title">ENMO ao Vivo</div>
+                    <div class="metric-val" id="liveENMO">0,000 <span style="font-size:16px;">g</span></div>
+                    <div class="metric-sub">Norma Euclidiana menos um</div>
+                </div>
+                <div class="card">
+                    <div class="card-title">MAD ao Vivo (filtrado)</div>
+                    <div class="metric-val" id="liveMAD">0,000 <span style="font-size:16px;">g</span></div>
+                    <div class="metric-sub">Desvio de Amplitude Médio (3–12 Hz)</div>
+                </div>
+                <div class="card">
+                    <div class="card-title">Amostras no Buffer</div>
+                    <div class="metric-val" id="bufferCount">0</div>
+                    <div class="metric-sub" id="recStatus">Em espera</div>
+                </div>
+            </div>
+            <div class="grid-2">
+                <div class="card">
+                    <div class="chart-header">
+                        <h3>Aceleração Bruta (g)</h3>
+                        <span style="font-size:12px;color:var(--text-muted);">Tempo real</span>
+                    </div>
+                    <div class="chart-container"><canvas id="rawChart"></canvas></div>
+                </div>
+                <div class="card">
+                    <div class="chart-header">
+                        <h3>Filtrado 3–12 Hz</h3>
+                        <select id="yScaleSelect" onchange="updateFilteredScale()" style="padding:2px 8px;font-size:12px;">
+                            <option value="0.1">±0,10 g</option>
+                            <option value="0.25" selected>±0,25 g</option>
+                            <option value="0.5">±0,50 g</option>
+                            <option value="1.0">±1,00 g</option>
+                            <option value="auto">Automático</option>
+                        </select>
+                    </div>
+                    <div class="chart-container"><canvas id="filteredChart"></canvas></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- TAB 2: REPORT -->
+        <div id="tab-report" class="tab-content hidden">
+            <div id="reportContainer">
+                <div class="card" style="margin-bottom:20px;">
+                    <div style="display:flex;justify-content:space-between;border-bottom:1px solid var(--card-border);padding-bottom:12px;margin-bottom:16px;flex-wrap:wrap;gap:12px;">
+                        <div>
+                            <h2 style="color:var(--primary-blue);" id="repPatient">Paciente: --</h2>
+                            <div style="font-size:14px;color:var(--text-muted);" id="repMeta">Tarefa: -- | Lado: -- | Data: --</div>
+                        </div>
+                        <button class="btn-success" onclick="exportReportImage()">Salvar Relatório PNG</button>
+                    </div>
+
+                    <!-- Métricas principais -->
+                    <div class="grid-4" style="margin-bottom:20px;">
+                        <div class="card" style="background:var(--surface-sunken);">
+                            <div class="card-title">Frequência Dominante</div>
+                            <div class="metric-val" style="color:var(--accent-red);" id="repDomFreq">-- <span style="font-size:16px;">Hz</span></div>
+                            <div class="metric-sub">Pico de potência espectral</div>
+                        </div>
+                        <div class="card" style="background:var(--surface-sunken);">
+                            <div class="card-title">Potência Rel. 3–8 Hz</div>
+                            <div class="metric-row">
+                                <div class="ring ring-sm" id="repRelPowerRing" style="--pct:0; --ring-color:var(--blue-600); --ring-hole:var(--surface-sunken);">
+                                    <div class="ring-hole"></div>
+                                </div>
+                                <div>
+                                    <div class="metric-val" style="color:var(--primary-blue);font-size:22px;" id="repRelPower">-- <span style="font-size:14px;">%</span></div>
+                                    <div class="metric-sub">Especificidade parkinsoniana</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="card" style="background:var(--surface-sunken);">
+                            <div class="card-title">Centroide Espectral</div>
+                            <div class="metric-val" id="repCentroid">-- <span style="font-size:16px;">Hz</span></div>
+                            <div class="metric-sub">Centro de massa de frequência</div>
+                        </div>
+                        <div class="card" style="background:var(--surface-sunken);">
+                            <div class="card-title">Razão Harmônica</div>
+                            <div class="metric-val" style="color:var(--accent-purple);" id="repHarmonic">--</div>
+                            <div class="metric-sub">Potência fundamental-para-harmônica</div>
+                        </div>
+                    </div>
+
+                    <!-- Métricas adicionais -->
+                    <div class="grid-3" style="margin-bottom:20px;">
+                        <div class="card" style="background:var(--surface-sunken);">
+                            <div class="card-title">Tremor RMS (3–12 Hz)</div>
+                            <div class="metric-val" style="font-size:22px;color:var(--accent-green);" id="repRMS">-- <span style="font-size:14px;">g</span></div>
+                            <div class="metric-sub">Amplitude limitada em banda</div>
+                        </div>
+                        <div class="card" style="background:var(--surface-sunken);">
+                            <div class="card-title">Variabilidade de Amplitude</div>
+                            <div class="metric-val" style="font-size:22px;" id="repVariability">-- <span style="font-size:14px;">%</span></div>
+                            <div class="metric-sub">CV do envelope do tremor</div>
+                        </div>
+                        <div class="card" style="background:var(--surface-sunken);">
+                            <div class="card-title">Tremor‑ativo</div>
+                            <div class="metric-val" style="font-size:22px;color:var(--accent-amber);" id="repOnTime">-- <span style="font-size:14px;">%</span></div>
+                            <div class="metric-sub">Acima do limiar (0,05 g)</div>
+                        </div>
+                    </div>
+
+                    <!-- Interpretação -->
+                    <div class="interpret-box" id="interpretBox">
+                        <strong>🧠 Interpretação Clínica</strong>
+                        <div id="interpretText" style="margin-top:6px;font-size:15px;line-height:1.6;color:var(--text-muted);">
+                            Aguardando dados da sessão…
+                        </div>
+                    </div>
+
+                    <!-- PSD -->
+                    <div class="chart-header" style="margin-top:16px;">
+                        <h3>Densidade Espectral de Potência (Welch, normalizada – eixos combinados)</h3>
+                        <span style="font-size:12px;color:var(--text-muted);">Segmentos sobrepostos • 0–20 Hz</span>
+                    </div>
+                    <div class="chart-container tall"><canvas id="psdChart"></canvas></div>
+
+                    <!-- Espectrograma -->
+                    <div class="chart-header" style="margin-top:20px;">
+                        <h3>Espectrograma (tempo‑frequência)</h3>
+                        <span style="font-size:12px;color:var(--text-muted);">Janela deslizante • cor = potência normalizada</span>
+                    </div>
+                    <div class="spectro-wrapper" style="height:260px;">
+                        <canvas id="spectrogramCanvas"></canvas>
+                    </div>
+                    <div class="spectro-legend">
+                        <span>0</span>
+                        <div class="colorbar"></div>
+                        <span>máx</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- TAB 3: COMPARE -->
+        <div id="tab-compare" class="tab-content hidden">
+            <div class="grid-2" style="margin-bottom:20px;">
+                <div class="card">
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                        <h3>Sessões Salvas</h3>
+                        <button class="btn-secondary" onclick="clearDatabase()" style="font-size:12px;padding:4px 10px;">Limpar Tudo</button>
+                    </div>
+                    <div style="max-height:350px;overflow-y:auto;">
+                        <table>
+                            <thead><tr><th>Selecionar</th><th>Paciente</th><th>Tarefa</th><th>Freq.Dom</th><th>3–8Hz%</th><th>Data</th></tr></thead>
+                            <tbody id="sessionTableBody"></tbody>
+                        </table>
+                    </div>
+                    <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">
+                        <button onclick="renderComparison()">Comparar Selecionados</button>
+                        <button class="btn-secondary" onclick="selectAllSessions()">Selecionar Todos</button>
+                    </div>
+                </div>
+                <div class="card">
+                    <h3>Sobreposição de PSD</h3>
+                    <div class="chart-container tall" style="margin-top:12px;"><canvas id="compareChart"></canvas></div>
+                </div>
+            </div>
+            <div class="card" id="comparisonMatrixCard">
+                <h3>Comparação de Métricas</h3>
+                <div style="overflow-x:auto;">
+                    <table id="comparisonMatrix">
+                        <thead id="matrixHeader"><tr><th>Métrica</th></tr></thead>
+                        <tbody id="matrixBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- ===== CARREGA O JAVASCRIPT EXTERNO ===== -->
+    <script src="script.js"></script>
+
+</body>
+</html>
