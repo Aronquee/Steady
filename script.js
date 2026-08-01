@@ -460,7 +460,7 @@ function processSessionData() {
     const threshold = 0.05;
     const onTime = (acMag.filter(v => Math.abs(v) > threshold).length / acMag.length) * 100;
 
-    // ---- Welch PSD combinando os três eixos ----
+    // ---- Welch PSD combinando os três eixos (potências) ----
     const segLen = Math.min(256, Math.floor(recordBuffer.length / 4));
     const overlap = Math.floor(segLen * 0.5);
     const nSegs = Math.max(1, Math.floor((recordBuffer.length - overlap) / (segLen - overlap)));
@@ -497,9 +497,10 @@ function processSessionData() {
         for (let i = 1; i < half; i++) {
             const f = i * (fs / nFft);
             if (f > 20) break;
-            const pwr = (Math.sqrt(realX[i] ** 2 + imagX[i] ** 2) +
-                         Math.sqrt(realY[i] ** 2 + imagY[i] ** 2) +
-                         Math.sqrt(realZ[i] ** 2 + imagZ[i] ** 2)) / nFft;
+            // CORREÇÃO: soma das POTÊNCIAS (quadrado das magnitudes) em vez de magnitudes
+            const pwr = (realX[i]*realX[i] + imagX[i]*imagX[i] +
+                         realY[i]*realY[i] + imagY[i]*imagY[i] +
+                         realZ[i]*realZ[i] + imagZ[i]*imagZ[i]) / nFft;
             psdSeg.push(pwr);
             freqSeg.push(f);
         }
@@ -717,7 +718,7 @@ function estimateDisplacement(signal, fs) {
 }
 
 // ======================================================================
-//  ESPECTROGRAMA – usa os sinais filtrados (fx, fy, fz)
+//  ESPECTROGRAMA – usa potência (quadrado) em vez de magnitude
 // ======================================================================
 function renderSpectrogram(filtX, filtY, filtZ, fs) {
     resizeSpectrogram();
@@ -802,9 +803,10 @@ function renderSpectrogram(filtX, filtY, filtZ, fs) {
         for (let r = 0; r < nFreqBins; r++) {
             const idx = r + 1;
             if (idx >= half) break;
-            const pwr = (Math.sqrt(realX[idx] ** 2 + imagX[idx] ** 2) +
-                         Math.sqrt(realY[idx] ** 2 + imagY[idx] ** 2) +
-                         Math.sqrt(realZ[idx] ** 2 + imagZ[idx] ** 2)) / nFft;
+            // CORREÇÃO: potência (quadrado) em vez de magnitude
+            const pwr = (realX[idx]*realX[idx] + imagX[idx]*imagX[idx] +
+                         realY[idx]*realY[idx] + imagY[idx]*imagY[idx] +
+                         realZ[idx]*realZ[idx] + imagZ[idx]*imagZ[idx]) / nFft;
             colData.push(pwr);
             if (pwr > maxPwrCol) {
                 maxPwrCol = pwr;
