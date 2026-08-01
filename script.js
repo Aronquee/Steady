@@ -1,4 +1,4 @@
-// ======================================================================
+ add // ======================================================================
 //  ONBOARDING
 // ======================================================================
 document.addEventListener('DOMContentLoaded', function() {
@@ -457,8 +457,14 @@ function processSessionData() {
     const meanEnv = envelope.reduce((a, b) => a + b, 0) / envelope.length;
     const stdEnv = Math.sqrt(envelope.reduce((s, v) => s + (v - meanEnv) ** 2, 0) / envelope.length);
     const variab = meanEnv > 0 ? (stdEnv / meanEnv) * 100 : 0;
-    const threshold = 0.05;
-    const onTime = (acMag.filter(v => Math.abs(v) > threshold).length / acMag.length) * 100;
+
+    // ---- LIMIAR DINÂMICO para tremor-ativo ----
+    // Usa 2 × MAD da amplitude filtrada (robusto), com mínimo de 0.02 g
+    const sortedMag = [...acMag].sort((a, b) => a - b);
+    const medianMag = sortedMag[Math.floor(sortedMag.length / 2)];
+    const madMag = acMag.reduce((s, v) => s + Math.abs(v - medianMag), 0) / acMag.length;
+    const dynamicThreshold = Math.max(0.02, 2 * madMag);
+    const onTime = (acMag.filter(v => Math.abs(v) > dynamicThreshold).length / acMag.length) * 100;
 
     // ---- Welch PSD combinando os três eixos (potências) ----
     const segLen = Math.min(256, Math.floor(recordBuffer.length / 4));
@@ -497,7 +503,6 @@ function processSessionData() {
         for (let i = 1; i < half; i++) {
             const f = i * (fs / nFft);
             if (f > 20) break;
-            // CORREÇÃO: soma das POTÊNCIAS (quadrado das magnitudes) em vez de magnitudes
             const pwr = (realX[i]*realX[i] + imagX[i]*imagX[i] +
                          realY[i]*realY[i] + imagY[i]*imagY[i] +
                          realZ[i]*realZ[i] + imagZ[i]*imagZ[i]) / nFft;
@@ -562,14 +567,29 @@ function processSessionData() {
     }
     const centroid = powSum > 0 ? weightedSum / powSum : 0;
 
-    // ---- Razão harmônica ----
-    let fundPow = 0, harmPow = 0;
-    for (let i = 0; i < allFreqs.length; i++) {
-        const f = allFreqs[i];
-        if (Math.abs(f - peakFreq) < 0.5) fundPow += allPsd[i];
-        if (Math.abs(f - 2 * peakFreq) < 0.8) harmPow += allPsd[i];
-        if (Math.abs(f - 3 * peakFreq) < 0.8) harmPow += allPsd[i];
+    // ---- Razão harmônica com banda proporcional à resolução espectral ----
+    // df = fs / nFft (resolução do segmento). Usamos o valor do primeiro segmento.
+    // Como nFft é o mesmo para todos, podemos calcular a partir de allFreqs.
+    const df = allFreqs.length > 1 ? allFreqs[1] - allFreqs[0] : 0.1; // fallback
+    const nBins = 2; // número de bins para cada lado (captura o lóbulo principal da Hann)
+    const halfBand = nBins * df;
+
+    function sumPowerInBand(freq, freqs, psd) {
+        let sum = 0;
+        const low = freq - halfBand;
+        const high = freq + halfBand;
+        for (let i = 0; i < freqs.length; i++) {
+            if (freqs[i] >= low && freqs[i] <= high) {
+                sum += psd[i];
+            }
+        }
+        return sum;
     }
+
+    const fundPow = sumPowerInBand(peakFreq, allFreqs, allPsd);
+    const harm2Pow = sumPowerInBand(2 * peakFreq, allFreqs, allPsd);
+    const harm3Pow = sumPowerInBand(3 * peakFreq, allFreqs, allPsd);
+    const harmPow = harm2Pow + harm3Pow;
     const harmonicRatio = fundPow > 0 ? (fundPow / (harmPow + 0.001)) : 0;
 
     // ---- Deslocamento estimado ----
@@ -594,7 +614,7 @@ function processSessionData() {
     document.getElementById('repVariability').innerHTML =
         `${variab.toFixed(1)} <span style="font-size:14px;">%</span>`;
     document.getElementById('repOnTime').innerHTML =
-        `${onTime.toFixed(1)} <span style="font-size:14px;">%</span>`;
+        `${onTime.toFixed(1)} <span style="font-size:14px;">%</span> (limiar dinâmico: ${dynamicThreshold.toFixed(3)} g)`;
 
     // ---- Interpretação clínica ----
     let interpret = '';
@@ -803,7 +823,6 @@ function renderSpectrogram(filtX, filtY, filtZ, fs) {
         for (let r = 0; r < nFreqBins; r++) {
             const idx = r + 1;
             if (idx >= half) break;
-            // CORREÇÃO: potência (quadrado) em vez de magnitude
             const pwr = (realX[idx]*realX[idx] + imagX[idx]*imagX[idx] +
                          realY[idx]*realY[idx] + imagY[idx]*imagY[idx] +
                          realZ[idx]*realZ[idx] + imagZ[idx]*imagZ[idx]) / nFft;
