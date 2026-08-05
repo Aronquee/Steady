@@ -40,7 +40,6 @@ let savedSessions = [];
 // Estado USB
 let usbPort = null;
 let usbReader = null;
-let usbReadableStream = null;
 let usbConnected = false;
 
 try {
@@ -417,11 +416,24 @@ async function connectUSB() {
         console.log('[USB] Porta obtida:', port);
 
         console.log('[USB] Abrindo porta com baudRate 115200...');
-        await port.open({ baudRate: 115200 });
+        await port.open({
+            baudRate: 115200,
+            dataBits: 8,
+            stopBits: 1,
+            parity: 'none',
+            flowControl: 'none'   // Evita DTR/RTS que podem resetar o ESP
+        });
         console.log('[USB] Porta aberta com sucesso.');
 
         usbConnected = true;
-        // ... atualiza UI ...
+
+        // ---- ATUALIZA UI ----
+        document.getElementById('usbStatusDot').className = 'status-usb connected';
+        document.getElementById('usbStatusText').textContent = 'USB Conectado';
+        document.getElementById('connectUsbBtn').textContent = 'Desconectar USB';
+        // USB permite iniciar gravação mesmo sem WS
+        document.getElementById('startBtn').disabled = false;
+        // ----------------------
 
         console.log('[USB] Obtendo reader...');
         const reader = port.readable.getReader();
@@ -436,14 +448,26 @@ async function connectUSB() {
         await disconnectUSB();
     }
 }
+
 async function disconnectUSB() {
+    console.log('[USB] disconnectUSB chamado.');
     usbConnected = false;
     if (usbReader) {
-        try { await usbReader.cancel(); } catch (e) {}
+        try {
+            await usbReader.cancel();
+            console.log('[USB] Reader cancelado.');
+        } catch (e) {
+            console.log('[USB] Erro ao cancelar reader:', e);
+        }
         usbReader = null;
     }
     if (usbPort) {
-        try { await usbPort.close(); } catch (e) {}
+        try {
+            await usbPort.close();
+            console.log('[USB] Porta fechada.');
+        } catch (e) {
+            console.log('[USB] Erro ao fechar porta:', e);
+        }
         usbPort = null;
     }
     document.getElementById('usbStatusDot').className = 'status-usb';
@@ -465,23 +489,54 @@ async function readLoopUSB(reader) {
             console.log('[USB] Aguardando reader.read()...');
             const { value, done } = await reader.read();
             console.log('[USB] read() retornou:', { done, valueLength: value ? value.length : 0 });
-            if (done || !usbConnected) {
-                console.log('[USB] Saindo do loop: done=' + done + ', usbConnected=' + usbConnected);
+
+            if (done) {
+                console.warn('[USB] Stream finalizado (done=true). O ESP pode não estar enviando dados ou a porta foi fechada.');
+                break;
+            }
+            if (!usbConnected) {
+                console.log('[USB] usbConnected = false, saindo do loop.');
                 break;
             }
 
-            // ... resto do código (concatena, processa) ...
-            // Adicione também um contador de pacotes:
-            packetCount++;
-            if (packetCount % 10 === 0) {
-                console.log('[USB] Pacotes processados até agora:', packetCount);
+            // Concatena ao buffer
+            const newBuffer = new Uint8Array(buffer.length + value.length);
+            newBuffer.set(buffer, 0);
+            newBuffer.set(value, buffer.length);
+            buffer = newBuffer;
+            console.log('[USB] Buffer atual:', buffer.length, 'bytes');
+
+            // Processa todos os pacotes completos
+            while (buffer.length >= expectedLen) {
+                const packet = buffer.slice(0, expectedLen);
+                buffer = buffer.slice(expectedLen);
+
+                const dv = new DataView(packet.buffer);
+                const ts = dv.getUint32(0, true);
+                const ax = dv.getFloat32(4, true);
+                const ay = dv.getFloat32(8, true);
+                const az = dv.getFloat32(12, true);
+                const fx = dv.getFloat32(16, true);
+                const fy = dv.getFloat32(20, true);
+                const fz = dv.getFloat32(24, true);
+                console.log('[USB] Pacote extraído, chamando processDataPacket com:', { ts, ax, ay, az, fx, fy, fz });
+                processDataPacket(ts, ax, ay, az, fx, fy, fz);
+                packetCount++;
+                if (packetCount % 10 === 0) {
+                    console.log('[USB] Pacotes processados até agora:', packetCount);
+                }
             }
         }
     } catch (err) {
-        console.error('[USB] Erro em readLoopUSB:', err);
+        if (err.name === 'CancelError') {
+            console.log('[USB] CancelError capturado (cancelamento intencional).');
+        } else {
+            console.error('[USB] Erro em readLoopUSB:', err);
+        }
     } finally {
         console.log('[USB] readLoopUSB finalizada');
         if (usbConnected) {
+            console.log('[USB] Chamando disconnectUSB para limpar estado.');
             await disconnectUSB();
         }
     }
