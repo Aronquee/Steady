@@ -31,6 +31,22 @@ struct ProcessedDataEvent {
 static QueueHandle_t dataQueue;
 static QueueHandle_t remoteCommandQueue;
 
+// =====================================================================
+//  NOVO: envio do pacote binário pela USB Serial
+//  Formato: 4 bytes (timestamp uint32_t) + 6 floats (24 bytes) = 28 bytes
+// =====================================================================
+void sendSerialPacket(const ProcessedData& data) {
+  uint8_t packet[28];
+  uint32_t ts = millis();  // ou um contador incremental, se preferir
+  memcpy(packet, &ts, 4);
+  float vals[6] = {
+    data.ax, data.ay, data.az,
+    data.fx, data.fy, data.fz
+  };
+  memcpy(packet + 4, vals, 24);
+  Serial.write(packet, 28);
+}
+
 // ---------------- Core 0 task: acquisition + DSP ----------------
 void sensorTask(void *pvParameters) {
   const TickType_t period = pdMS_TO_TICKS(1000 / SAMPLE_RATE_HZ);
@@ -40,8 +56,13 @@ void sensorTask(void *pvParameters) {
     IMUSample sample;
     if (sensor.readSample(sample)) {
       ProcessedData data = pipeline.process(sample);
+      
+      // Envia para a fila (UI/WebSocket)
       ProcessedDataEvent evt{data};
       xQueueSend(dataQueue, &evt, 0);
+
+      // NOVO: envia o mesmo pacote pela USB Serial
+      sendSerialPacket(data);
     }
     vTaskDelayUntil(&lastWake, period);
   }
