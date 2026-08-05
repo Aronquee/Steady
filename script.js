@@ -285,6 +285,7 @@ function switchTab(tab) {
 //  PROCESSAMENTO COMUM DE PACOTES
 // ======================================================================
 function processDataPacket(ts, ax, ay, az, fx, fy, fz) {
+    console.log('[processDataPacket] Entrou com:', ts, ax, ay, az, fx, fy, fz);
     pendingRaw.ts.push(ts);
     pendingRaw.ax.push(ax);
     pendingRaw.ay.push(ay);
@@ -459,6 +460,7 @@ async function readLoopUSB(reader) {
     try {
         while (true) {
             const { value, done } = await reader.read();
+            console.log('[USB] read() retornou:', { done, valueLength: value ? value.length : 0 });
             if (done || !usbConnected) break;
 
             // Concatena ao buffer
@@ -466,7 +468,7 @@ async function readLoopUSB(reader) {
             newBuffer.set(buffer, 0);
             newBuffer.set(value, buffer.length);
             buffer = newBuffer;
-
+            console.log('[USB] Buffer atual:', buffer.length, 'bytes');
             // Processa todos os pacotes completos
             while (buffer.length >= expectedLen) {
                 const packet = buffer.slice(0, expectedLen);
@@ -481,7 +483,7 @@ async function readLoopUSB(reader) {
                 const fx = dv.getFloat32(16, true);
                 const fy = dv.getFloat32(20, true);
                 const fz = dv.getFloat32(24, true);
-
+                console.log('[USB] Pacote extraído, chamando processDataPacket com:', { ts, ax, ay, az, fx, fy, fz });
                 processDataPacket(ts, ax, ay, az, fx, fy, fz);
             }
         }
