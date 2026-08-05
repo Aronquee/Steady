@@ -398,43 +398,44 @@ function connectWS() {
 //  USB (Web Serial)
 // ======================================================================
 async function connectUSB() {
+    console.log('[USB] connectUSB() chamada');
     if (!('serial' in navigator)) {
         alert('Web Serial API não suportada neste navegador. Use Chrome ou Edge.');
         return;
     }
 
     if (usbConnected) {
-        // Desconectar
+        console.log('[USB] Já conectado, desconectando...');
         await disconnectUSB();
         return;
     }
 
     try {
-        // Solicita porta
+        console.log('[USB] Solicitando porta...');
         const port = await navigator.serial.requestPort();
         usbPort = port;
+        console.log('[USB] Porta obtida:', port);
 
-        // Abre com baud rate (ajuste conforme seu dispositivo)
+        console.log('[USB] Abrindo porta com baudRate 115200...');
         await port.open({ baudRate: 115200 });
+        console.log('[USB] Porta aberta com sucesso.');
 
         usbConnected = true;
-        document.getElementById('usbStatusDot').className = 'status-usb connected';
-        document.getElementById('usbStatusText').textContent = 'USB Conectado';
-        document.getElementById('connectUsbBtn').textContent = 'Desconectar USB';
-        document.getElementById('startBtn').disabled = false;
+        // ... atualiza UI ...
 
-        // Inicia leitura
+        console.log('[USB] Obtendo reader...');
         const reader = port.readable.getReader();
         usbReader = reader;
+        console.log('[USB] Reader criado, chamando readLoopUSB...');
         readLoopUSB(reader);
+        console.log('[USB] readLoopUSB chamada (assíncrona).');
 
     } catch (err) {
-        console.error('Erro ao conectar USB:', err);
+        console.error('[USB] Erro em connectUSB:', err);
         alert('Falha ao conectar USB: ' + err.message);
         await disconnectUSB();
     }
 }
-
 async function disconnectUSB() {
     usbConnected = false;
     if (usbReader) {
@@ -454,45 +455,32 @@ async function disconnectUSB() {
 }
 
 async function readLoopUSB(reader) {
+    console.log('[USB] readLoopUSB iniciada');
     let buffer = new Uint8Array(0);
     const expectedLen = 28;
+    let packetCount = 0;
 
     try {
         while (true) {
+            console.log('[USB] Aguardando reader.read()...');
             const { value, done } = await reader.read();
             console.log('[USB] read() retornou:', { done, valueLength: value ? value.length : 0 });
-            if (done || !usbConnected) break;
+            if (done || !usbConnected) {
+                console.log('[USB] Saindo do loop: done=' + done + ', usbConnected=' + usbConnected);
+                break;
+            }
 
-            // Concatena ao buffer
-            const newBuffer = new Uint8Array(buffer.length + value.length);
-            newBuffer.set(buffer, 0);
-            newBuffer.set(value, buffer.length);
-            buffer = newBuffer;
-            console.log('[USB] Buffer atual:', buffer.length, 'bytes');
-            // Processa todos os pacotes completos
-            while (buffer.length >= expectedLen) {
-                const packet = buffer.slice(0, expectedLen);
-                buffer = buffer.slice(expectedLen);
-
-                // Interpreta como little-endian: timestamp uint32 + 6 floats
-                const dv = new DataView(packet.buffer);
-                const ts = dv.getUint32(0, true);
-                const ax = dv.getFloat32(4, true);
-                const ay = dv.getFloat32(8, true);
-                const az = dv.getFloat32(12, true);
-                const fx = dv.getFloat32(16, true);
-                const fy = dv.getFloat32(20, true);
-                const fz = dv.getFloat32(24, true);
-                console.log('[USB] Pacote extraído, chamando processDataPacket com:', { ts, ax, ay, az, fx, fy, fz });
-                processDataPacket(ts, ax, ay, az, fx, fy, fz);
+            // ... resto do código (concatena, processa) ...
+            // Adicione também um contador de pacotes:
+            packetCount++;
+            if (packetCount % 10 === 0) {
+                console.log('[USB] Pacotes processados até agora:', packetCount);
             }
         }
     } catch (err) {
-        if (err.name !== 'CancelError') {
-            console.error('Erro na leitura USB:', err);
-        }
+        console.error('[USB] Erro em readLoopUSB:', err);
     } finally {
-        // Se a leitura parar, desconecta
+        console.log('[USB] readLoopUSB finalizada');
         if (usbConnected) {
             await disconnectUSB();
         }
