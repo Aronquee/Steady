@@ -211,7 +211,7 @@ function initCharts() {
                 fill: true,
                 borderWidth: 2,
                 pointRadius: 0,
-                tension: 0.2
+                tension: 0
             }]
         }
     });
