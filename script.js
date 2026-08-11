@@ -46,20 +46,36 @@ let savedSessions = [];
 //  NÃO aplica um segundo filtro; apenas analisa o sinal recebido.
 // ======================================================================
 const ANALYSIS_CONFIG = Object.freeze({
+    signalBand: {
+        lowHz: 1.5,
+        highHz: 15.0
+    },
+
+    // Banda operacional atual de análise.
+    // Não representa uma definição fisiológica ou clínica universal.
+    tremorBand: {
+        lowHz: 2.0,
+        highHz: 9.0
+    },
+
+    welch: {
+        segmentSamples: 512,
+        overlap: 0.50,
+        fftSamples: 1024,
+        maxFrequencyHz: 20.0
+    },
+
+    signalQuality: {
+        minRmsG: 0.02
+    },
+
+    // Parâmetros de aquisição/validação, não de análise espectral.
     expectedFsHz: 128,
-    filterLowHz: 1.5,
-    filterHighHz: 15,
-    tremorLowHz: 3,
-    tremorHighHz: 7,
-    psdMaxHz: 15,
-    nperseg: 512,      // 4 s a 128 Hz; fixo para comparabilidade clínica
-    noverlap: 256,     // 50%
-    nfft: 1024,       // zero-padding; espaçamento visual de 0.125 Hz
     fsWarnPct: 2,
     minDurationSec: 4
 });
 
-const ANALYSIS_VERSION = '4.0-welch-128hz-3to7';
+const ANALYSIS_VERSION = '5.0-welch-128hz-2to9';
 
 // Estado USB
 let usbPort = null;
@@ -177,8 +193,8 @@ function initCharts() {
         scales: {
             x: {
                 type: 'linear',
-                min: ANALYSIS_CONFIG.filterLowHz,
-                max: ANALYSIS_CONFIG.psdMaxHz,
+                min: ANALYSIS_CONFIG.signalBand.lowHz,
+                max: ANALYSIS_CONFIG.signalBand.highHz,
                 grid: { color: '#E9EDF2' },
                 ticks: { color: '#6B7A8B' },
                 title: { display: true, text: 'Frequência (Hz)', color: '#6B7A8B' }
@@ -197,15 +213,15 @@ function initCharts() {
             annotations: {
                 tremorBand: {
                     type: 'box',
-                    xMin: ANALYSIS_CONFIG.tremorLowHz,
-                    xMax: ANALYSIS_CONFIG.tremorHighHz,
+                    xMin: ANALYSIS_CONFIG.tremorBand.lowHz,
+                    xMax: ANALYSIS_CONFIG.tremorBand.highHz,
                     yMin: 0,
                     yMax: 1,
                     backgroundColor: 'rgba(30,123,173,0.08)',
                     borderColor: 'rgba(30,123,173,0.3)',
                     borderWidth: 1,
                     label: {
-                        content: 'Banda de tremor 3–7 Hz',
+                        content: `Banda operacional ${ANALYSIS_CONFIG.tremorBand.lowHz}–${ANALYSIS_CONFIG.tremorBand.highHz} Hz`,
                         enabled: true,
                         position: 'top',
                         color: '#1E7BAD',
@@ -222,7 +238,7 @@ function initCharts() {
                     borderWidth: 2,
                     borderDash: [6, 4],
                     label: {
-                        content: 'Pico 3–7 Hz',
+                        content: `Pico ${ANALYSIS_CONFIG.tremorBand.lowHz}–${ANALYSIS_CONFIG.tremorBand.highHz} Hz`,
                         enabled: true,
                         position: 'start',
                         color: '#C43A44',
@@ -261,8 +277,8 @@ function initCharts() {
             scales: {
                 x: {
                     type: 'linear',
-                    min: ANALYSIS_CONFIG.filterLowHz,
-                    max: ANALYSIS_CONFIG.psdMaxHz,
+                    min: ANALYSIS_CONFIG.signalBand.lowHz,
+                    max: ANALYSIS_CONFIG.welch.maxFrequencyHz,
                     grid: { color: '#E9EDF2' },
                     ticks: { color: '#6B7A8B' },
                     title: { display: true, text: 'Frequência (Hz)', color: '#6B7A8B' }
@@ -730,7 +746,7 @@ function updateRawCountBadge() {
 // ======================================================================
 //  CORE SIGNAL PROCESSING (mesmo código, com sessionId e UPDRS)
 // ======================================================================
-function integratePSD(freqs, psd, low, high) {
+function integrateBandPower(freqs, psd, low, high) {
     if (!freqs || freqs.length < 2 || !psd || psd.length !== freqs.length) return 0;
     let area = 0;
     for (let i = 1; i < freqs.length; i++) {
@@ -777,13 +793,13 @@ function detrendMean(arr) {
 function computeWelchPSD3D(filtX, filtY, filtZ, fs) {
     const cfg = ANALYSIS_CONFIG;
     const N = filtX.length;
-    const segLen = cfg.nperseg;
-    const step = segLen - cfg.noverlap;
+    const segLen = cfg.welch.segmentSamples;
+    const step = Math.max(1, Math.round(segLen * (1 - cfg.welch.overlap)));
     if (N < segLen) {
         throw new Error(`A sessão precisa de pelo menos ${cfg.minDurationSec.toFixed(0)} s (${segLen} amostras) para a análise espectral padronizada.`);
     }
 
-    const nfft = Math.max(cfg.nfft, segLen);
+    const nfft = Math.max(cfg.welch.fftSamples, segLen);
     const half = Math.floor(nfft / 2);
     const window = new Float64Array(segLen);
     let sumW2 = 0;
@@ -816,7 +832,7 @@ function computeWelchPSD3D(filtX, filtY, filtZ, fs) {
 
         for (let k = 0; k <= half; k++) {
             const f = k * fs / nfft;
-            if (f > cfg.psdMaxHz) break;
+            if (f > cfg.welch.maxFrequencyHz) break;
             const px = realX[k] * realX[k] + imagX[k] * imagX[k];
             const py = realY[k] * realY[k] + imagY[k] * imagY[k];
             const pz = realZ[k] * realZ[k] + imagZ[k] * imagZ[k];
@@ -831,33 +847,33 @@ function computeWelchPSD3D(filtX, filtY, filtZ, fs) {
     const psd = [];
     for (let k = 0; k <= half; k++) {
         const f = k * fs / nfft;
-        if (f < cfg.filterLowHz || f > cfg.psdMaxHz) continue;
+        if (f < cfg.signalBand.lowHz || f > cfg.welch.maxFrequencyHz) continue;
         freqs.push(f);
         psd.push(sumPsd[k] / Math.max(1, nSegs));
     }
 
     // A média de periodogramas é a estimativa de Welch. O valor abaixo
     // representa a energia espectral triaxial total, em g²/Hz.
-    const totalPower = integratePSD(freqs, psd, cfg.filterLowHz, cfg.filterHighHz);
-    const tremorPower = integratePSD(freqs, psd, cfg.tremorLowHz, cfg.tremorHighHz);
+    const totalPower = integrateBandPower(freqs, psd, cfg.signalBand.lowHz, cfg.signalBand.highHz);
+    const tremorPower = integrateBandPower(freqs, psd, cfg.tremorBand.lowHz, cfg.tremorBand.highHz);
     const relativeTremorPower = totalPower > 0 ? 100 * tremorPower / totalPower : 0;
     const tremorRms = Math.sqrt(Math.max(0, tremorPower));
 
     let peakFreq = 0, peakPower = -Infinity;
     for (let i = 0; i < freqs.length; i++) {
-        if (freqs[i] < cfg.tremorLowHz || freqs[i] > cfg.tremorHighHz) continue;
+        if (freqs[i] < cfg.tremorBand.lowHz || freqs[i] > cfg.tremorBand.highHz) continue;
         if (psd[i] > peakPower) {
             peakPower = psd[i];
             peakFreq = freqs[i];
         }
     }
 
-    const centroid = weightedCentroid(freqs, psd, cfg.tremorLowHz, cfg.tremorHighHz);
-    const totalCentroid = weightedCentroid(freqs, psd, cfg.filterLowHz, cfg.filterHighHz);
+    const centroid = weightedCentroid(freqs, psd, cfg.tremorBand.lowHz, cfg.tremorBand.highHz);
+    const totalCentroid = weightedCentroid(freqs, psd, cfg.signalBand.lowHz, cfg.signalBand.highHz);
 
     function sumPowerNear(freq) {
         const width = Math.max(0.5, 2 * (freqs[1] - freqs[0]));
-        return integratePSD(freqs, psd, Math.max(cfg.filterLowHz, freq - width), Math.min(cfg.psdMaxHz, freq + width));
+        return integrateBandPower(freqs, psd, Math.max(cfg.signalBand.lowHz, freq - width), Math.min(cfg.welch.maxFrequencyHz, freq + width));
     }
     const fundamentalPower = peakFreq > 0 ? sumPowerNear(peakFreq) : 0;
     const secondHarmonicPower = peakFreq > 0 ? sumPowerNear(2 * peakFreq) : 0;
@@ -871,6 +887,9 @@ function computeWelchPSD3D(filtX, filtY, filtZ, fs) {
 
     return {
         freqs,
+        psdRaw: psd,
+        psdNorm: psdNormArea,
+        // Compatibilidade com sessões/exportações anteriores.
         psd,
         psdNormArea,
         nSegs,
@@ -894,7 +913,7 @@ function processSessionData(sessionId) {
     const side = document.getElementById('sideSelect').value;
     const updrs = parseFloat(document.getElementById('updrsInput').value) || 0;
 
-    if (!recordBuffer || recordBuffer.length < ANALYSIS_CONFIG.nperseg) {
+    if (!recordBuffer || recordBuffer.length < ANALYSIS_CONFIG.welch.segmentSamples) {
         alert(`Dados insuficientes. Grave pelo menos ${ANALYSIS_CONFIG.minDurationSec} s para obter uma PSD de Welch padronizada.`);
         return;
     }
@@ -920,7 +939,11 @@ function processSessionData(sessionId) {
     const acY = filtY.map(v => v - meanY);
     const acZ = filtZ.map(v => v - meanZ);
     const vectorMag = acX.map((_, i) => Math.sqrt(acX[i]**2 + acY[i]**2 + acZ[i]**2));
-    const rmsVal = Math.sqrt(meanOf(vectorMag.map(v => v*v)));
+
+    // RMS do sinal filtrado completo (1,5–15 Hz), separado do RMS da banda operacional.
+    const filteredRmsVal = Math.sqrt(meanOf(
+        filtX.map((_, i) => filtX[i]**2 + filtY[i]**2 + filtZ[i]**2)
+    ));
     const madVal = meanOf(vectorMag.map(v => Math.abs(v - meanOf(vectorMag))));
 
     const rawX = recordBuffer.map(r=>Number(r[1]) || 0);
@@ -948,19 +971,21 @@ function processSessionData(sessionId) {
     }
 
     const {
-        freqs, psd, psdNormArea, nSegs, segLen, nfft, df,
+        freqs, psdRaw, psdNorm, nSegs, segLen, nfft, df,
         totalPower, tremorPower, tremorRms, relativeTremorPower,
         peakFreq, centroid, totalCentroid, harmonicRatio
     } = spectral;
+    const psd = psdRaw;
 
     const isSpectrallyUsable = totalPower > 0 && tremorPower > 0;
+    const signalQualityOk = filteredRmsVal >= ANALYSIS_CONFIG.signalQuality.minRmsG;
     const freqLabels = freqs.map(f => f.toFixed(3));
     const samplingWarning = fsDeviationPct > ANALYSIS_CONFIG.fsWarnPct;
 
     // ---------- ATUALIZA UI ----------
     document.getElementById('repPatient').textContent = `Paciente: ${patId} (UPDRS: ${updrs})`;
     document.getElementById('repMeta').textContent =
-        `Tarefa: ${task} | Lado: ${side} | ${durationSec.toFixed(1)} s | fs medido: ${fs.toFixed(2)} Hz | filtro recebido: ${ANALYSIS_CONFIG.filterLowHz}–${ANALYSIS_CONFIG.filterHighHz} Hz`;
+        `Tarefa: ${task} | Lado: ${side} | ${durationSec.toFixed(1)} s | fs medido: ${fs.toFixed(2)} Hz | filtro recebido: ${ANALYSIS_CONFIG.signalBand.lowHz}–${ANALYSIS_CONFIG.signalBand.highHz} Hz`;
 
     document.getElementById('repDomFreq').innerHTML = isSpectrallyUsable
         ? `${peakFreq.toFixed(2)} <span style="font-size:16px;">Hz</span>` : '—';
@@ -974,22 +999,24 @@ function processSessionData(sessionId) {
     const bandPowerEl = document.getElementById('repBandPower');
     if (bandPowerEl) bandPowerEl.innerHTML = `${tremorPower.toFixed(6)} <span style="font-size:13px;">g²</span>`;
     document.getElementById('repRMS').innerHTML = `${tremorRms.toFixed(4)} <span style="font-size:14px;">g</span>`;
+    const filteredRmsEl = document.getElementById('repFilteredRMS');
+    if (filteredRmsEl) filteredRmsEl.innerHTML = `${filteredRmsVal.toFixed(4)} <span style="font-size:14px;">g</span>`;
     document.getElementById('repVariability').innerHTML = `${variab.toFixed(1)} <span style="font-size:14px;">%</span>`;
     document.getElementById('repOnTime').innerHTML = `${onTime.toFixed(1)} <span style="font-size:14px;">%</span>`;
 
     let interpret = `
         <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;">
           <span class="badge-clinical" style="background:var(--blue-100);color:var(--blue-700);">ANÁLISE QUANTITATIVA</span>
-          <span class="badge-clinical" style="background:var(--gray-200);color:var(--gray-700);">Welch ${segLen} amostras / 50% overlap</span>
+          <span class="badge-clinical" style="background:var(--gray-200);color:var(--gray-700);">Welch ${segLen} amostras / ${(ANALYSIS_CONFIG.welch.overlap * 100).toFixed(0)}% overlap • NFFT ${nfft}</span>
           <span class="badge-clinical" style="background:var(--surface-sunken);color:var(--ink-500);border:1px solid var(--border);">Δf = ${df.toFixed(3)} Hz</span>
         </div>
         <div>
-          <strong>Potência de tremor 3–7 Hz:</strong> ${tremorPower.toFixed(6)} g²<br>
-          <strong>RMS de tremor 3–7 Hz:</strong> ${tremorRms.toFixed(4)} g<br>
-          <strong>Frequência dominante 3–7 Hz:</strong> ${isSpectrallyUsable ? peakFreq.toFixed(2) + ' Hz' : 'não determinada'}<br>
-          <strong>Potência relativa 3–7 Hz:</strong> ${relativeTremorPower.toFixed(1)}% da potência ${ANALYSIS_CONFIG.filterLowHz}–${ANALYSIS_CONFIG.filterHighHz} Hz.
+          <strong>Potência ${ANALYSIS_CONFIG.tremorBand.lowHz}–${ANALYSIS_CONFIG.tremorBand.highHz} Hz:</strong> ${tremorPower.toFixed(6)} g²<br>
+          <strong>RMS ${ANALYSIS_CONFIG.tremorBand.lowHz}–${ANALYSIS_CONFIG.tremorBand.highHz} Hz:</strong> ${tremorRms.toFixed(4)} g<br>
+          <strong>Frequência dominante ${ANALYSIS_CONFIG.tremorBand.lowHz}–${ANALYSIS_CONFIG.tremorBand.highHz} Hz:</strong> ${isSpectrallyUsable ? peakFreq.toFixed(2) + ' Hz' : 'não determinada'}<br>
+          <strong>Potência relativa ${ANALYSIS_CONFIG.tremorBand.lowHz}–${ANALYSIS_CONFIG.tremorBand.highHz} Hz:</strong> ${relativeTremorPower.toFixed(1)}% da potência ${ANALYSIS_CONFIG.signalBand.lowHz}–${ANALYSIS_CONFIG.signalBand.highHz} Hz.
           ${samplingWarning ? `<br><span style="color:var(--red-600);"><strong>⚠️ Atenção:</strong> fs medido difere ${fsDeviationPct.toFixed(1)}% do esperado (${ANALYSIS_CONFIG.expectedFsHz} Hz). Verifique o timestamp/firmware antes de comparar sessões.</span>` : ''}
-          <br><small style="color:var(--ink-400);">Estas métricas descrevem o sinal medido e não constituem diagnóstico ou classificação de gravidade clínica.</small>
+          <br><small style="color:var(--ink-400);">Estas métricas descrevem quantitativamente o sinal registrado e não constituem diagnóstico ou classificação clínica.</small>
         </div>`;
     document.getElementById('interpretText').innerHTML = interpret;
 
@@ -997,11 +1024,11 @@ function processSessionData(sessionId) {
     psdChart.data.datasets[0].data = freqs.map((f, i) => ({x: f, y: psd[i]}));
     psdChart.data.datasets[0].label = 'PSD triaxial — Welch';
     psdChart.options.scales.y.title.text = 'PSD (g²/Hz)';
-    psdChart.options.scales.x.min = ANALYSIS_CONFIG.filterLowHz;
-    psdChart.options.scales.x.max = ANALYSIS_CONFIG.psdMaxHz;
+    psdChart.options.scales.x.min = ANALYSIS_CONFIG.signalBand.lowHz;
+    psdChart.options.scales.x.max = ANALYSIS_CONFIG.welch.maxFrequencyHz;
     if (psdChart.options.plugins?.annotation?.annotations?.domLine) {
-        psdChart.options.plugins.annotation.annotations.domLine.xMin = peakFreq || ANALYSIS_CONFIG.tremorLowHz;
-        psdChart.options.plugins.annotation.annotations.domLine.xMax = peakFreq || ANALYSIS_CONFIG.tremorLowHz;
+        psdChart.options.plugins.annotation.annotations.domLine.xMin = peakFreq || ANALYSIS_CONFIG.tremorBand.lowHz;
+        psdChart.options.plugins.annotation.annotations.domLine.xMax = peakFreq || ANALYSIS_CONFIG.tremorBand.lowHz;
         psdChart.options.plugins.annotation.annotations.domLine.display = isSpectrallyUsable;
     }
     psdChart.update();
@@ -1022,12 +1049,15 @@ function processSessionData(sessionId) {
         fs: fs.toFixed(3),
         fsExpected: ANALYSIS_CONFIG.expectedFsHz,
         fsDeviationPct: fsDeviationPct.toFixed(2),
-        filterLowHz: ANALYSIS_CONFIG.filterLowHz,
-        filterHighHz: ANALYSIS_CONFIG.filterHighHz,
-        tremorLowHz: ANALYSIS_CONFIG.tremorLowHz,
-        tremorHighHz: ANALYSIS_CONFIG.tremorHighHz,
+        analysisConfig: structuredClone(ANALYSIS_CONFIG),
+        sampleCount: recordBuffer.length,
+        sampleRateHz: fs,
+        filterLowHz: ANALYSIS_CONFIG.signalBand.lowHz,
+        filterHighHz: ANALYSIS_CONFIG.signalBand.highHz,
+        tremorLowHz: ANALYSIS_CONFIG.tremorBand.lowHz,
+        tremorHighHz: ANALYSIS_CONFIG.tremorBand.highHz,
         nperseg: segLen,
-        noverlap: ANALYSIS_CONFIG.noverlap,
+        noverlap: Math.round(ANALYSIS_CONFIG.welch.segmentSamples * ANALYSIS_CONFIG.welch.overlap),
         nfft,
         df: df.toFixed(5),
         domFreq: isSpectrallyUsable ? peakFreq.toFixed(2) : '—',
@@ -1037,15 +1067,19 @@ function processSessionData(sessionId) {
         centroid: isSpectrallyUsable ? centroid.toFixed(2) : '—',
         totalCentroid: totalCentroid.toFixed(2),
         harmonic: harmonicRatio == null ? '—' : harmonicRatio.toFixed(3),
-        rms: rmsVal.toFixed(5),
+        rms: filteredRmsVal.toFixed(5),
         variability: variab.toFixed(1),
         onTime: onTime.toFixed(1),
         mad: madVal.toFixed(5),
         enmo: enmoVal.toFixed(5),
         freqs: freqLabels,
-        psdDensity: psd,
-        psdNormArea,
-        psd: psd, // novo significado: PSD absoluta; mantido para compatibilidade com exportações
+        psdRaw,
+        psdNorm,
+        psdDensity: psdRaw,
+        psdNormArea: psdNorm,
+        psd: psdRaw, // compatibilidade com exportações anteriores
+        rawDataStorage: 'IndexedDB',
+        filteredDataIncludedInRaw: true,
         hasRaw: true
     };
 
@@ -1404,12 +1438,12 @@ function renderComparison() {
     if (selected.length === 0) { alert('Selecione pelo menos uma sessão.'); return; }
 
     const colors = ['#1E7BAD', '#C43A44', '#86929E', '#4FA8DA', '#E0636B', '#172230'];
-    const spectral = selected.filter(s => s.analysisVersion === ANALYSIS_VERSION && Array.isArray(s.psdDensity) && Array.isArray(s.freqs));
+    const spectral = selected.filter(s => s.analysisVersion === ANALYSIS_VERSION && Array.isArray(s.psdRaw) && Array.isArray(s.freqs));
     const legacy = selected.length - spectral.length;
 
     compareChart.data.datasets = spectral.map((s, i) => ({
         label: `${s.patientId} • ${s.task}`,
-        data: s.freqs.map((f, k) => ({ x: Number(f), y: Number(s.psdDensity[k]) })),
+        data: s.freqs.map((f, k) => ({ x: Number(f), y: Number(s.psdRaw[k]) })),
         borderColor: colors[i % colors.length],
         borderWidth: 2,
         pointRadius: 0,
@@ -1424,11 +1458,11 @@ function renderComparison() {
 
     const rows = [
         { name: 'UPDRS', key: 'updrs' },
-        { name: 'Freq. dominante 3–7 Hz (Hz)', key: 'domFreq' },
-        { name: 'Potência de tremor 3–7 Hz (g²)', key: 'tremorPower' },
-        { name: 'RMS de tremor 3–7 Hz (g)', key: 'tremorRMS' },
-        { name: 'Potência relativa 3–7 Hz (%)', key: 'relPower' },
-        { name: 'Centroide 3–7 Hz (Hz)', key: 'centroid' },
+        { name: `Freq. dominante ${ANALYSIS_CONFIG.tremorBand.lowHz}–${ANALYSIS_CONFIG.tremorBand.highHz} Hz (Hz)`, key: 'domFreq' },
+        { name: `Potência ${ANALYSIS_CONFIG.tremorBand.lowHz}–${ANALYSIS_CONFIG.tremorBand.highHz} Hz (g²)`, key: 'tremorPower' },
+        { name: `RMS ${ANALYSIS_CONFIG.tremorBand.lowHz}–${ANALYSIS_CONFIG.tremorBand.highHz} Hz (g)`, key: 'tremorRMS' },
+        { name: `Potência relativa ${ANALYSIS_CONFIG.tremorBand.lowHz}–${ANALYSIS_CONFIG.tremorBand.highHz} Hz (%)`, key: 'relPower' },
+        { name: `Centroide ${ANALYSIS_CONFIG.tremorBand.lowHz}–${ANALYSIS_CONFIG.tremorBand.highHz} Hz (Hz)`, key: 'centroid' },
         { name: 'Razão harmônica', key: 'harmonic' },
         { name: 'RMS total filtrado 1,5–15 Hz (g)', key: 'rms' },
         { name: 'Variabilidade do envelope (%)', key: 'variability' },
@@ -1472,16 +1506,21 @@ async function exportExcel() {
         'UPDRS': s.updrs || 0,
         'Data': s.date,
         'Duração (s)': s.duration,
-        'fs medido (Hz)': s.fs || '',
+        'Amostras': s.sampleCount ?? '',
+        'fs medido (Hz)': s.sampleRateHz ?? s.fs ?? '',
         'fs esperado (Hz)': s.fsExpected || '',
         'Desvio fs (%)': s.fsDeviationPct || '',
         'Filtro recebido (Hz)': `${s.filterLowHz ?? ''}-${s.filterHighHz ?? ''}`,
         'Banda tremor (Hz)': `${s.tremorLowHz ?? ''}-${s.tremorHighHz ?? ''}`,
-        'Freq. dominante 3-7 Hz (Hz)': s.domFreq,
-        'Potência tremor 3-7 Hz (g²)': s.tremorPower,
-        'RMS tremor 3-7 Hz (g)': s.tremorRMS,
-        'Potência relativa 3-7 Hz (%)': s.relPower,
-        'Centroide 3-7 Hz (Hz)': s.centroid,
+        'Welch (amostras)': s.nperseg ?? '',
+        'Welch (overlap)': s.noverlap != null ? `${((s.noverlap / Math.max(1, s.nperseg)) * 100).toFixed(1)}%` : '',
+        'NFFT': s.nfft ?? '',
+        'Δf (Hz)': s.df ?? '',
+        [`Freq. dominante ${ANALYSIS_CONFIG.tremorBand.lowHz}-${ANALYSIS_CONFIG.tremorBand.highHz} Hz (Hz)`]: s.domFreq,
+        [`Potência ${ANALYSIS_CONFIG.tremorBand.lowHz}-${ANALYSIS_CONFIG.tremorBand.highHz} Hz (g²)`]: s.tremorPower,
+        [`RMS ${ANALYSIS_CONFIG.tremorBand.lowHz}-${ANALYSIS_CONFIG.tremorBand.highHz} Hz (g)`]: s.tremorRMS,
+        [`Potência relativa ${ANALYSIS_CONFIG.tremorBand.lowHz}-${ANALYSIS_CONFIG.tremorBand.highHz} Hz (%)`]: s.relPower,
+        [`Centroide ${ANALYSIS_CONFIG.tremorBand.lowHz}-${ANALYSIS_CONFIG.tremorBand.highHz} Hz (Hz)`]: s.centroid,
         'Centroide 1,5-15 Hz (Hz)': s.totalCentroid,
         'Razão harmônica': s.harmonic,
         'RMS total filtrado 1,5-15 Hz (g)': s.rms,
@@ -1491,13 +1530,13 @@ async function exportExcel() {
         'ENMO (g)': s.enmo
     }));
 
-    const spectral = selected.filter(s => s.analysisVersion === ANALYSIS_VERSION && Array.isArray(s.psdDensity));
-    const maxLen = Math.max(0, ...spectral.map(s => s.psdDensity.length));
+    const spectral = selected.filter(s => s.analysisVersion === ANALYSIS_VERSION && Array.isArray(s.psdRaw));
+    const maxLen = Math.max(0, ...spectral.map(s => s.psdRaw.length));
     const specRows = [];
     for (let i = 0; i < maxLen; i++) {
         const row = { 'Freq. (Hz)': spectral[0]?.freqs?.[i] ?? '' };
         spectral.forEach(s => {
-            row[`${s.patientId} (${s.task}) PSD (g²/Hz)`] = s.psdDensity?.[i] ?? '';
+            row[`${s.patientId} (${s.task}) PSD (g²/Hz)`] = s.psdRaw?.[i] ?? '';
         });
         specRows.push(row);
     }
@@ -1520,7 +1559,7 @@ async function exportExcel() {
 // ======================================================================
 async function exportCSV() {
     const ids = Array.from(document.querySelectorAll('.session-select:checked')).map(cb => Number(cb.value));
-    const selected = savedSessions.filter(s => ids.includes(s.id));
+    let selected = savedSessions.filter(s => ids.includes(s.id));
     if (selected.length === 0) { alert('Selecione pelo menos uma sessão.'); return; }
 
     // Verifica se todas as sessões selecionadas possuem dados brutos
@@ -1551,6 +1590,8 @@ async function exportCSV() {
             session_id: s.id,
             patient: s.patientId,
             task: s.task,
+            side: s.side || '',
+            updrs: s.updrs ?? '',
             timestamp: row[0],
             ax: row[1],
             ay: row[2],
@@ -1568,7 +1609,7 @@ async function exportCSV() {
     }
 
     // Converte para CSV
-    const headers = ['session_id', 'patient', 'task', 'timestamp', 'ax', 'ay', 'az', 'fx', 'fy', 'fz'];
+    const headers = ['session_id', 'patient', 'task', 'side', 'updrs', 'timestamp', 'ax', 'ay', 'az', 'fx', 'fy', 'fz'];
     let csv = headers.join(',') + '\n';
     for (const row of allRows) {
         const vals = headers.map(h => row[h] ?? '');
