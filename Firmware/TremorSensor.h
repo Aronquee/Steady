@@ -6,7 +6,7 @@
 // the data came from the onboard QMI8658 or (later) the BNO085.
 struct IMUSample {
   float ax, ay, az;   // g
-  float gx, gy, gz;   // deg/s (unused by current pipeline, reserved)
+  float gx, gy, gz;   // deg/s
   uint32_t timestamp_ms;
 };
 

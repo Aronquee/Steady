@@ -12,6 +12,7 @@
 #include "DSPPipeline.h"
 #include "DisplayManager.h"
 #include "NetworkManager.h"
+#include "esp_timer.h"
 
 // ---------------- Shared objects ----------------
 QMI8658Sensor sensor;
@@ -37,10 +38,10 @@ static QueueHandle_t remoteCommandQueue;
 // =====================================================================
 void sendSerialPacket(const ProcessedData& data) {
   uint8_t packet[28];
-  uint32_t ts = millis();  // ou um contador incremental, se preferir
+  uint32_t ts = data.timestamp_ms; // ou um contador incremental, se preferir
   memcpy(packet, &ts, 4);
   float vals[6] = {
-    data.ax, data.ay, data.az,
+    data.raw_ax, data.raw_ay, data.raw_az,
     data.fx, data.fy, data.fz
   };
   memcpy(packet + 4, vals, 24);
@@ -49,23 +50,39 @@ void sendSerialPacket(const ProcessedData& data) {
 
 // ---------------- Core 0 task: acquisition + DSP ----------------
 void sensorTask(void *pvParameters) {
-  const TickType_t period = pdMS_TO_TICKS(1000 / SAMPLE_RATE_HZ);
-  TickType_t lastWake = xTaskGetTickCount();
 
-  for (;;) {
-    IMUSample sample;
-    if (sensor.readSample(sample)) {
-      ProcessedData data = pipeline.process(sample);
-      
-      // Envia para a fila (UI/WebSocket)
-      ProcessedDataEvent evt{data};
-      xQueueSend(dataQueue, &evt, 0);
+    constexpr int64_t SAMPLE_PERIOD_US =
+        1000000LL / SAMPLE_RATE_HZ;
 
-      // NOVO: envia o mesmo pacote pela USB Serial
-      sendSerialPacket(data);
+    int64_t nextSampleTime = esp_timer_get_time();
+
+    for (;;) {
+
+        IMUSample sample;
+
+        if (sensor.readSample(sample)) {
+
+            ProcessedData data = pipeline.process(sample);
+
+            ProcessedDataEvent evt{data};
+            xQueueSend(dataQueue, &evt, 0);
+
+            sendSerialPacket(data);
+        }
+
+        nextSampleTime += SAMPLE_PERIOD_US;
+
+        int64_t now = esp_timer_get_time();
+
+        if (nextSampleTime > now) {
+            delayMicroseconds(
+                (uint32_t)(nextSampleTime - now)
+            );
+        } else {
+            // Não deixa o atraso acumular indefinidamente.
+            nextSampleTime = now;
+        }
     }
-    vTaskDelayUntil(&lastWake, period);
-  }
 }
 
 // ---------------- Core 1 task: UI + network ----------------

@@ -47,27 +47,22 @@
 // offline PC analysis (see analysis_advanced.py, Phase 3).
 
 #define SAMPLE_RATE_HZ          128
-#define BANDPASS_LOW_HZ         3.0f
+#define BANDPASS_LOW_HZ         1.5f
 #define BANDPASS_HIGH_HZ        15.0f
 #define ENVELOPE_TIME_CONST_MS  200   // smoothing for the on-screen amplitude bar ONLY —
                                        // not a clinical measurement, just keeps the bar readable
 
-// Real Butterworth bandpass coefficients, scipy-validated:
-// scipy.signal.butter(4, [3, 12], btype='band', fs=250, output='sos')
-// This was validated offline against captures; no real tremor data was
-// available yet, so re-check against real recordings before relying on
-// the exact numbers clinically.
-//
 // Section count is implicit in the array size (see DSPPipeline.cpp,
 // which uses sizeof(BANDPASS_SOS)/sizeof(BANDPASS_SOS[0])) so it can
 // never drift out of sync with a separately-tracked count constant.
 struct BiquadCoeffs { float b0, b1, b2, a1, a2; };
 static const BiquadCoeffs BANDPASS_SOS[] = {
-  {0.000712309f, 0.000000000f, -0.000712309f, -1.836984396f, 0.870179892f},
-  {1.000000000f, 2.000000000f, 1.000000000f, -1.887593454f, 0.924283862f},
-  {1.000000000f, -2.000000000f, 1.000000000f, -1.757560134f, 0.866086841f},
-  {1.000000000f, -2.000000000f, 1.000000000f, -1.948504031f, 0.975382149f}
+  {0.005779804f, 0.011559609f, 0.005779804f, -1.071386222f, 0.321152116f},
+  {1.000000000f, 2.000000000f, 1.000000000f, -1.237042990f, 0.649448774f},
+  {1.000000000f, -2.000000000f, 1.000000000f, -1.849700930f, 0.856868102f},
+  {1.000000000f, -2.000000000f, 1.000000000f, -1.947386559f, 0.952897069f},
 };
+
 
 // ---------------- Networking -----------------------------------------
 #define WIFI_STA_SSID        "Seu_Wifi"     // TODO fill in
