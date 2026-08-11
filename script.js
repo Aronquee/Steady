@@ -17,6 +17,8 @@ document.addEventListener('DOMContentLoaded', function() {
             localStorage.setItem('steady_onboarding_v1', 'true');
         }
     });
+    // Inicializa contagem de brutos
+    updateRawCountBadge();
 });
 
 // ======================================================================
@@ -70,6 +72,7 @@ window.onload = () => {
         document.getElementById('connectUsbBtn').title = 'Web Serial API não suportada neste navegador';
         document.getElementById('usbStatusText').textContent = 'USB não suportado';
     }
+    updateRawCountBadge();
 };
 window.addEventListener('resize', () => {
     resizeSpectrogram();
@@ -583,20 +586,110 @@ function stopRecording() {
     if (ws && ws.readyState === WebSocket.OPEN) ws.send('stop');
 
     if (recordBuffer.length > 30) {
-        processSessionData();
-        document.getElementById('exportBtn').disabled = false;
+        // --- SALVAR BRUTOS NO INDEXEDDB (Fase 1) ---
+        const sessionId = Date.now();
+        // Salva de forma assíncrona, sem bloquear a UI
+        saveRawData(sessionId, recordBuffer).then(() => {
+            // Após salvar, processa os dados e gera relatório
+            processSessionData(sessionId);
+            document.getElementById('exportBtn').disabled = false;
+            updateRawCountBadge();
+        }).catch(err => {
+            console.error('Erro ao salvar brutos:', err);
+            // Mesmo com erro, processa a sessão (sem brutos)
+            processSessionData(sessionId);
+            document.getElementById('exportBtn').disabled = false;
+        });
     } else {
         alert('Gravação muito curta para análise espectral.');
     }
 }
 
 // ======================================================================
-//  CORE SIGNAL PROCESSING (mesmo código)
+//  INDEXEDDB – RAW DATA STORAGE (Fase 1)
 // ======================================================================
-function processSessionData() {
+function openRawDB() {
+    return new Promise((resolve, reject) => {
+        const request = indexedDB.open('STEADY_RawDB', 1);
+        request.onupgradeneeded = (evt) => {
+            const db = evt.target.result;
+            if (!db.objectStoreNames.contains('raw_signals')) {
+                db.createObjectStore('raw_signals', { keyPath: 'id' });
+            }
+        };
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+    });
+}
+
+async function saveRawData(sessionId, buffer) {
+    const db = await openRawDB();
+    const tx = db.transaction('raw_signals', 'readwrite');
+    const store = tx.objectStore('raw_signals');
+    const data = {
+        id: sessionId,
+        buffer: buffer // array de [ts, ax, ay, az, fx, fy, fz]
+    };
+    await new Promise((resolve, reject) => {
+        const req = store.put(data);
+        req.onsuccess = resolve;
+        req.onerror = reject;
+    });
+    db.close();
+}
+
+async function getRawData(sessionId) {
+    const db = await openRawDB();
+    const tx = db.transaction('raw_signals', 'readonly');
+    const store = tx.objectStore('raw_signals');
+    const data = await new Promise((resolve, reject) => {
+        const req = store.get(sessionId);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = reject;
+    });
+    db.close();
+    return data ? data.buffer : null;
+}
+
+async function deleteRawData(sessionId) {
+    const db = await openRawDB();
+    const tx = db.transaction('raw_signals', 'readwrite');
+    const store = tx.objectStore('raw_signals');
+    await new Promise((resolve, reject) => {
+        const req = store.delete(sessionId);
+        req.onsuccess = resolve;
+        req.onerror = reject;
+    });
+    db.close();
+}
+
+async function countRawSessions() {
+    const db = await openRawDB();
+    const tx = db.transaction('raw_signals', 'readonly');
+    const store = tx.objectStore('raw_signals');
+    const count = await new Promise((resolve, reject) => {
+        const req = store.count();
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = reject;
+    });
+    db.close();
+    return count;
+}
+
+function updateRawCountBadge() {
+    countRawSessions().then(cnt => {
+        document.getElementById('rawCountBadge').textContent = `💾 Brutos: ${cnt}`;
+    }).catch(err => console.warn('Erro ao contar brutos:', err));
+}
+
+// ======================================================================
+//  CORE SIGNAL PROCESSING (mesmo código, com sessionId e UPDRS)
+// ======================================================================
+function processSessionData(sessionId) {
     const patId = document.getElementById('patientId').value.trim() || 'NÃO IDENTIFICADO';
     const task = document.getElementById('taskSelect').value;
     const side = document.getElementById('sideSelect').value;
+    const updrs = parseFloat(document.getElementById('updrsInput').value) || 0;
 
     const t0 = recordBuffer[0][0];
     const tN = recordBuffer[recordBuffer.length - 1][0];
@@ -762,7 +855,8 @@ function processSessionData() {
 
     const dispEst = estimateDisplacement(filtMag, fs);
 
-    document.getElementById('repPatient').textContent = `Paciente: ${patId}`;
+    // Atualiza UI do relatório
+    document.getElementById('repPatient').textContent = `Paciente: ${patId} (UPDRS: ${updrs})`;
     document.getElementById('repMeta').textContent =
         `Tarefa: ${task} | Lado: ${side} | ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()} | ${durationSec.toFixed(1)}s`;
 
@@ -814,7 +908,7 @@ function processSessionData() {
         'Baixa especificidade — pode refletir movimento voluntário ou tremor de baixa amplitude.'}
       ${harmonicRatio > 1.8 ? 'Estrutura harmônica proeminente sugere oscilação sinusoidal.' : 'Baixa razão harmônica — forma de onda menos sinusoidal.'}
       ${variab > 40 ? '⚠️ Alta variabilidade de amplitude — pode indicar tremor intermitente ou reemergente.' : 'A amplitude está relativamente estável ao longo da gravação.'}
-      <br><small style="color:var(--ink-400);">Tarefa: ${task} | Lado: ${side}</small>
+      <br><small style="color:var(--ink-400);">Tarefa: ${task} | Lado: ${side} | UPDRS: ${updrs}</small>
     </div>
   `;
     document.getElementById('interpretText').innerHTML = interpret;
@@ -835,10 +929,11 @@ function processSessionData() {
     renderSpectrogram(filtX, filtY, filtZ, fs);
 
     const sessionRecord = {
-        id: Date.now(),
+        id: sessionId,
         patientId: patId,
         task,
         side,
+        updrs: updrs,
         date: new Date().toLocaleDateString() + ' ' + new Date().toLocaleTimeString([], { hour: '2-digit',
             minute: '2-digit' }),
         duration: durationSec.toFixed(1),
@@ -853,7 +948,8 @@ function processSessionData() {
         enmo: enmoVal.toFixed(3),
         disp: dispEst.toFixed(2),
         freqs: freqLabels,
-        psd: psdNorm
+        psd: psdNorm,
+        hasRaw: true // Indicador de que os brutos foram salvos
     };
 
     savedSessions.unshift(sessionRecord);
@@ -1162,16 +1258,17 @@ function fftRadix2(real, imag) {
 }
 
 // ======================================================================
-//  DATABASE
+//  DATABASE (localStorage + IndexedDB)
 // ======================================================================
 function renderSessionTable() {
     const tbody = document.getElementById('sessionTableBody');
     tbody.innerHTML = '';
     savedSessions.forEach(s => {
         const tr = document.createElement('tr');
+        const rawIcon = s.hasRaw ? '💾' : '🚫';
         tr.innerHTML = `
       <td><input type="checkbox" class="session-select" value="${s.id}"></td>
-      <td style="font-weight:600;">${s.patientId}</td>
+      <td style="font-weight:600;">${s.patientId} <span class="raw-badge">${rawIcon}</span></td>
       <td>${s.task} ${s.side||''}</td>
       <td>${s.domFreq} Hz</td>
       <td>${s.relPower}%</td>
@@ -1182,7 +1279,13 @@ function renderSessionTable() {
 }
 
 function clearDatabase() {
-    if (confirm('Limpar todas as sessões armazenadas?')) {
+    if (confirm('Limpar todas as sessões armazenadas? Isso também removerá os dados brutos.')) {
+        // Remove todos os brutos do IndexedDB
+        savedSessions.forEach(async s => {
+            if (s.hasRaw) {
+                await deleteRawData(s.id).catch(e => console.warn('Erro ao deletar bruto:', e));
+            }
+        });
         savedSessions = [];
         try {
             localStorage.removeItem('steady_sessions');
@@ -1191,6 +1294,7 @@ function clearDatabase() {
         document.getElementById('comparisonMatrix').querySelector('tbody').innerHTML = '';
         compareChart.data.datasets = [];
         compareChart.update();
+        updateRawCountBadge();
     }
 }
 
@@ -1220,6 +1324,7 @@ function renderComparison() {
         `<th>${s.patientId}<br><small>${s.task}</small></th>`).join('');
 
     const rows = [
+        { name: 'UPDRS', key: 'updrs' },
         { name: 'Freq. Dom. (Hz)', key: 'domFreq' },
         { name: 'Potência 3–8Hz (%)', key: 'relPower' },
         { name: 'Centroide (Hz)', key: 'centroid' },
@@ -1234,12 +1339,160 @@ function renderComparison() {
 
     mBody.innerHTML = rows.map(r =>
         `<tr><td style="font-weight:600;color:var(--text-muted);">${r.name}</td>
-     ${selected.map(s => `<td>${s[r.key] || '—'}</td>`).join('')}</tr>`
+     ${selected.map(s => `<td>${s[r.key] !== undefined ? s[r.key] : '—'}</td>`).join('')}</tr>`
     ).join('');
 }
 
 // ======================================================================
-//  EXPORTAR PNG
+//  EXPORTAR EXCEL (Fase 2.1)
+// ======================================================================
+async function exportExcel() {
+    const ids = Array.from(document.querySelectorAll('.session-select:checked')).map(cb => Number(cb.value));
+    const selected = savedSessions.filter(s => ids.includes(s.id));
+    if (selected.length === 0) { alert('Selecione pelo menos uma sessão.'); return; }
+
+    // Aba 1: Resumo
+    const summaryRows = selected.map(s => ({
+        'ID': s.id,
+        'Paciente': s.patientId,
+        'Tarefa': s.task,
+        'Lado': s.side || '',
+        'UPDRS': s.updrs || 0,
+        'Data': s.date,
+        'Duração (s)': s.duration,
+        'Freq. Dominante (Hz)': s.domFreq,
+        'Potência 3-8Hz (%)': s.relPower,
+        'Centroide (Hz)': s.centroid,
+        'Razão Harmônica': s.harmonic,
+        'RMS (g)': s.rms,
+        'Variabilidade (%)': s.variability,
+        'Tremor-ativo (%)': s.onTime,
+        'MAD (g)': s.mad,
+        'ENMO (g)': s.enmo,
+        'Desloc. (mm)': s.disp
+    }));
+
+    // Aba 2: Espectros
+    const maxLen = Math.max(...selected.map(s => (s.psd || []).length));
+    const specRows = [];
+    for (let i = 0; i < maxLen; i++) {
+        const row = { 'Freq. (Hz)': selected[0]?.freqs?.[i] || '' };
+        selected.forEach(s => {
+            row[`${s.patientId} (${s.task})`] = s.psd?.[i] ?? '';
+        });
+        specRows.push(row);
+    }
+
+    const wb = XLSX.utils.book_new();
+    const ws1 = XLSX.utils.json_to_sheet(summaryRows);
+    XLSX.utils.book_append_sheet(wb, ws1, 'Resumo');
+    const ws2 = XLSX.utils.json_to_sheet(specRows);
+    XLSX.utils.book_append_sheet(wb, ws2, 'Espectros');
+
+    const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
+    const blob = new Blob([wbout], { type: 'application/octet-stream' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `STEADY_Export_${Date.now()}.xlsx`;
+    link.click();
+    URL.revokeObjectURL(link.href);
+}
+
+// ======================================================================
+//  EXPORTAR CSV (Fase 2.2)
+// ======================================================================
+async function exportCSV() {
+    const ids = Array.from(document.querySelectorAll('.session-select:checked')).map(cb => Number(cb.value));
+    const selected = savedSessions.filter(s => ids.includes(s.id));
+    if (selected.length === 0) { alert('Selecione pelo menos uma sessão.'); return; }
+
+    // Verifica se todas as sessões selecionadas possuem dados brutos
+    const missing = selected.filter(s => !s.hasRaw);
+    if (missing.length > 0) {
+        const msg = `As seguintes sessões não possuem dados brutos (foram gravadas antes da atualização):\n${missing.map(s => `${s.patientId} (${s.task})`).join('\n')}\n\nDeseja continuar exportando apenas as que possuem dados?`;
+        if (!confirm(msg)) return;
+        // Filtra apenas as que têm raw
+        const hasRawSelected = selected.filter(s => s.hasRaw);
+        if (hasRawSelected.length === 0) {
+            alert('Nenhuma das selecionadas possui dados brutos.');
+            return;
+        }
+        // Atualiza a lista para apenas as que têm raw
+        selected = hasRawSelected;
+    }
+
+    // Coleta os dados brutos do IndexedDB
+    let allRows = [];
+    for (const s of selected) {
+        const buffer = await getRawData(s.id);
+        if (!buffer) {
+            console.warn(`Dados brutos não encontrados para sessão ${s.id}`);
+            continue;
+        }
+        // buffer é um array de [ts, ax, ay, az, fx, fy, fz]
+        const rows = buffer.map(row => ({
+            session_id: s.id,
+            patient: s.patientId,
+            task: s.task,
+            timestamp: row[0],
+            ax: row[1],
+            ay: row[2],
+            az: row[3],
+            fx: row[4],
+            fy: row[5],
+            fz: row[6]
+        }));
+        allRows = allRows.concat(rows);
+    }
+
+    if (allRows.length === 0) {
+        alert('Nenhum dado bruto encontrado para exportar.');
+        return;
+    }
+
+    // Converte para CSV
+    const headers = ['session_id', 'patient', 'task', 'timestamp', 'ax', 'ay', 'az', 'fx', 'fy', 'fz'];
+    let csv = headers.join(',') + '\n';
+    for (const row of allRows) {
+        const vals = headers.map(h => row[h] ?? '');
+        csv += vals.join(',') + '\n';
+    }
+
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `STEADY_Raw_${Date.now()}.csv`;
+    link.click();
+    URL.revokeObjectURL(link.href);
+}
+
+// ======================================================================
+//  EXCLUIR BRUTOS SELECIONADOS (Fase 4)
+// ======================================================================
+async function deleteSelectedRaw() {
+    const ids = Array.from(document.querySelectorAll('.session-select:checked')).map(cb => Number(cb.value));
+    const selected = savedSessions.filter(s => ids.includes(s.id) && s.hasRaw);
+    if (selected.length === 0) {
+        alert('Nenhuma sessão com dados brutos selecionada.');
+        return;
+    }
+    if (!confirm(`Tem certeza que deseja excluir os dados brutos de ${selected.length} sessão(ões)? Esta ação não pode ser desfeita.`)) return;
+
+    for (const s of selected) {
+        await deleteRawData(s.id);
+        s.hasRaw = false;
+    }
+    // Atualiza localStorage
+    try {
+        localStorage.setItem('steady_sessions', JSON.stringify(savedSessions));
+    } catch (e) { /* ignore */ }
+    renderSessionTable();
+    updateRawCountBadge();
+    alert('Dados brutos removidos com sucesso.');
+}
+
+// ======================================================================
+//  EXPORTAR PNG (mantido)
 // ======================================================================
 function exportReportImage() {
     const target = document.getElementById('reportContainer');

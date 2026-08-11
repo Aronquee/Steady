@@ -46,9 +46,9 @@
 // no episode detection. That interpretation now lives entirely in the
 // offline PC analysis (see analysis_advanced.py, Phase 3).
 
-#define SAMPLE_RATE_HZ          250
+#define SAMPLE_RATE_HZ          128
 #define BANDPASS_LOW_HZ         3.0f
-#define BANDPASS_HIGH_HZ        12.0f
+#define BANDPASS_HIGH_HZ        15.0f
 #define ENVELOPE_TIME_CONST_MS  200   // smoothing for the on-screen amplitude bar ONLY —
                                        // not a clinical measurement, just keeps the bar readable
 
@@ -63,10 +63,10 @@
 // never drift out of sync with a separately-tracked count constant.
 struct BiquadCoeffs { float b0, b1, b2, a1, a2; };
 static const BiquadCoeffs BANDPASS_SOS[] = {
-  {0.000123755894f, 0.000247511788f, 0.000123755894f, -1.71052470f, 0.752280408f},
-  {1.0000000000f,   2.0000000000f,   1.0000000000f,   -1.86280644f, 0.872982264f},
-  {1.0000000000f,  -2.0000000000f,   1.0000000000f,   -1.79344953f, 0.873155420f},
-  {1.0000000000f,  -2.0000000000f,   1.0000000000f,   -1.95829789f, 0.964224602f}
+  {0.000712309f, 0.000000000f, -0.000712309f, -1.836984396f, 0.870179892f},
+  {1.000000000f, 2.000000000f, 1.000000000f, -1.887593454f, 0.924283862f},
+  {1.000000000f, -2.000000000f, 1.000000000f, -1.757560134f, 0.866086841f},
+  {1.000000000f, -2.000000000f, 1.000000000f, -1.948504031f, 0.975382149f}
 };
 
 // ---------------- Networking -----------------------------------------

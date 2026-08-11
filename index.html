@@ -1,20 +1,22 @@
 <!-- ======================================================================
      STEADY – Sistema de Análise de Tremor
-     Versão com suporte a USB (Web Serial) + WebSocket
+     Versão com suporte a USB (Web Serial) + WebSocket + Exportação Avançada
      ====================================================================== -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>STEADY – Sistema de Análise de Tremor v2.6 (USB)</title>
+    <title>STEADY – Sistema de Análise de Tremor v3.0 (Exportação)</title>
 
-    <!-- Chart.js, plugin de anotação e html2canvas -->
+    <!-- Chart.js, plugin de anotação, html2canvas e SheetJS -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js">
     </script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js">
     </script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js">
+    </script>
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js">
     </script>
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -22,7 +24,7 @@
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 
     <style>
-        /* ===== ESTILOS (mesmos de antes, com pequenos acréscimos para USB) ===== */
+        /* ===== ESTILOS (mesmos de antes, com pequenos acréscimos para USB e novos botões) ===== */
         :root {
             --bg: #F6F8FB;
             --surface: #FFFFFF;
@@ -321,6 +323,9 @@
             border-color: var(--blue-500);
             box-shadow: 0 0 0 4px var(--blue-100);
             background: var(--surface);
+        }
+        input[type="number"] {
+            width: 70px;
         }
         .status-badge {
             display: flex;
@@ -633,6 +638,17 @@
             border-radius: var(--radius-pill);
             background: linear-gradient(to right, #0a1628, #1a3a6b, #2a7fb0, #6eb5d9, #f0c27f);
         }
+        .raw-badge {
+            display: inline-block;
+            margin-left: 6px;
+            font-size: 14px;
+        }
+        .actions-bar {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin-top: 12px;
+        }
         @media (max-width: 900px) {
             .grid-2,
             .grid-3 {
@@ -646,7 +662,6 @@
                 flex-wrap: wrap;
             }
         }
-
         /* Estilos para o seletor de fonte e status USB */
         .source-selector {
             display: flex;
@@ -676,6 +691,14 @@
         .status-usb.connected {
             background: var(--blue-500);
             box-shadow: 0 0 0 4px var(--blue-100);
+        }
+        .badge-count {
+            background: var(--blue-50);
+            color: var(--blue-700);
+            padding: 4px 12px;
+            border-radius: var(--radius-pill);
+            font-size: 12px;
+            font-weight: 600;
         }
     </style>
 </head>
@@ -730,12 +753,14 @@
                 </div>
                 <div class="brand-text">
                     <h1>STEADY</h1>
-                    <small>Sistema de Análise de Tremor &middot; v2.6 (USB)</small>
+                    <small>Sistema de Análise de Tremor &middot; v3.0 (Exportação)</small>
                 </div>
             </div>
             <div class="patient-bar">
                 <label>Paciente:</label>
                 <input type="text" id="patientId" value="PACIENTE-001" style="width:130px;" />
+                <label>UPDRS (0–4):</label>
+                <input type="number" id="updrsInput" min="0" max="4" step="0.5" value="0" style="width:70px;" />
                 <label>Tarefa:</label>
                 <select id="taskSelect">
                     <option value="Rest">Tremor de Repouso</option>
@@ -764,6 +789,9 @@
                     <span id="usbStatusText">USB Desconectado</span>
                 </div>
                 <button class="btn-usb" onclick="connectUSB()" id="connectUsbBtn">Conectar USB</button>
+
+                <!-- Badge de contagem de brutos -->
+                <span class="badge-count" id="rawCountBadge">💾 Brutos: 0</span>
             </div>
         </header>
 
@@ -947,9 +975,12 @@
                             <tbody id="sessionTableBody"></tbody>
                         </table>
                     </div>
-                    <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">
+                    <div class="actions-bar">
                         <button onclick="renderComparison()">Comparar Selecionados</button>
                         <button class="btn-secondary" onclick="selectAllSessions()">Selecionar Todos</button>
+                        <button class="btn-secondary" onclick="exportExcel()">📊 Exportar Processados (.xlsx)</button>
+                        <button class="btn-secondary" onclick="exportCSV()">📄 Exportar Brutos Selecionados (.csv)</button>
+                        <button class="btn-danger" onclick="deleteSelectedRaw()" style="font-size:12px;padding:4px 10px;">🗑️ Excluir Brutos das Selecionadas</button>
                     </div>
                 </div>
                 <div class="card">
