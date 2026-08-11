@@ -156,7 +156,7 @@ function initCharts() {
             x: { grid: { color: '#E9EDF2' }, ticks: { color: '#6B7A8B' }, title: { display: true,
                     text: 'Frequência (Hz)', color: '#6B7A8B' } },
             y: { grid: { color: '#E9EDF2' }, ticks: { color: '#6B7A8B' }, title: { display: true,
-                    text: 'Magnitude Normalizada', color: '#6B7A8B' }, min: 0, max: 1.05 }
+                    text: 'Magnitude Normalizada', color: '#6B7A8B' }, min: 0 }
         }
     };
 
@@ -930,16 +930,17 @@ function processSessionData(sessionId) {
     }
     document.getElementById('interpretText').innerHTML = interpret;
 
-    // ---------- GRÁFICO PSD (mantido normalizado 0–1) ----------
+
+    // ---------- GRÁFICO PSD (MAGNITUDE ABSOLUTA) ----------
     const freqLabels = allFreqs.map(f => f.toFixed(1));
     psdChart.data.labels = freqLabels;
-    psdChart.data.datasets[0].data = psdNorm;
-    psdChart.data.datasets[0].label = 'PSD (Welch)';
-    psdChart.options.scales.y.title.text = 'Magnitude Normalizada';
-    psdChart.options.scales.y.min = 0;
-    psdChart.options.scales.y.max = 1.05;
+    psdChart.data.datasets[0].data = psdRaw;                     // ← usa a PSD absoluta
+    psdChart.data.datasets[0].label = 'PSD (g²/Hz)';            // ← atualiza o rótulo
+    psdChart.options.scales.y.title.text = 'PSD (g²/Hz)';       // ← título do eixo
+    psdChart.options.scales.y.min = 0;                          // mantém mínimo zero
+    delete psdChart.options.scales.y.max;                       // remove o máximo fixo
 
-    // Anotação da linha da frequência dominante – só se houver tremor
+    // Linha da frequência dominante – só se houver tremor (isTremor)
     if (psdChart.options.plugins && psdChart.options.plugins.annotation &&
         psdChart.options.plugins.annotation.annotations &&
         psdChart.options.plugins.annotation.annotations.domLine) {
@@ -950,8 +951,8 @@ function processSessionData(sessionId) {
         } else {
             psdChart.options.plugins.annotation.annotations.domLine.display = false;
         }
-    }
-    psdChart.update();
+}
+    psdChart.update();    
 
     resizeSpectrogram();
     renderSpectrogram(filtX, filtY, filtZ, fs);
