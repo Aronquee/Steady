@@ -39,6 +39,28 @@ let spectroCtx = null;
 let spectroCanvas = null;
 let savedSessions = [];
 
+
+// ======================================================================
+//  ANÁLISE ESPECTRAL — CONFIGURAÇÃO DO SINAL RECEBIDO
+//  Os valores fx/fy/fz já chegam FILTRADOS pelo firmware. O frontend
+//  NÃO aplica um segundo filtro; apenas analisa o sinal recebido.
+// ======================================================================
+const ANALYSIS_CONFIG = Object.freeze({
+    expectedFsHz: 128,
+    filterLowHz: 1.5,
+    filterHighHz: 15,
+    tremorLowHz: 3,
+    tremorHighHz: 7,
+    psdMaxHz: 15,
+    nperseg: 512,      // 4 s a 128 Hz; fixo para comparabilidade clínica
+    noverlap: 256,     // 50%
+    nfft: 1024,       // zero-padding; espaçamento visual de 0.125 Hz
+    fsWarnPct: 2,
+    minDurationSec: 4
+});
+
+const ANALYSIS_VERSION = '4.0-welch-128hz-3to7';
+
 // Estado USB
 let usbPort = null;
 let usbReader = null;
@@ -153,27 +175,37 @@ function initCharts() {
             legend: { labels: { color: '#1E7BAD' } }
         },
         scales: {
-            x: { grid: { color: '#E9EDF2' }, ticks: { color: '#6B7A8B' }, title: { display: true,
-                    text: 'Frequência (Hz)', color: '#6B7A8B' } },
-            y: { grid: { color: '#E9EDF2' }, ticks: { color: '#6B7A8B' }, title: { display: true,
-                    text: 'Magnitude Normalizada', color: '#6B7A8B' }, min: 0 }
+            x: {
+                type: 'linear',
+                min: ANALYSIS_CONFIG.filterLowHz,
+                max: ANALYSIS_CONFIG.psdMaxHz,
+                grid: { color: '#E9EDF2' },
+                ticks: { color: '#6B7A8B' },
+                title: { display: true, text: 'Frequência (Hz)', color: '#6B7A8B' }
+            },
+            y: {
+                grid: { color: '#E9EDF2' },
+                ticks: { color: '#6B7A8B' },
+                title: { display: true, text: 'PSD (g²/Hz)', color: '#6B7A8B' },
+                min: 0
+            }
         }
     };
 
     if (annotationPluginAvailable) {
         psdOptions.plugins.annotation = {
             annotations: {
-                box3_8: {
+                tremorBand: {
                     type: 'box',
-                    xMin: 3,
-                    xMax: 8,
+                    xMin: ANALYSIS_CONFIG.tremorLowHz,
+                    xMax: ANALYSIS_CONFIG.tremorHighHz,
                     yMin: 0,
-                    yMax: 1.1,
+                    yMax: 1,
                     backgroundColor: 'rgba(30,123,173,0.08)',
                     borderColor: 'rgba(30,123,173,0.3)',
                     borderWidth: 1,
                     label: {
-                        content: '3–8 Hz',
+                        content: 'Banda de tremor 3–7 Hz',
                         enabled: true,
                         position: 'top',
                         color: '#1E7BAD',
@@ -185,12 +217,12 @@ function initCharts() {
                     xMin: 0,
                     xMax: 0,
                     yMin: 0,
-                    yMax: 1.1,
+                    yMax: 1,
                     borderColor: '#C43A44',
                     borderWidth: 2,
                     borderDash: [6, 4],
                     label: {
-                        content: 'Freq. Dominante',
+                        content: 'Pico 3–7 Hz',
                         enabled: true,
                         position: 'start',
                         color: '#C43A44',
@@ -224,13 +256,26 @@ function initCharts() {
         options: {
             responsive: true,
             maintainAspectRatio: false,
+            parsing: false,
             plugins: { legend: { labels: { color: '#6B7A8B' } } },
             scales: {
-                x: { grid: { color: '#E9EDF2' }, ticks: { color: '#6B7A8B' } },
-                y: { grid: { color: '#E9EDF2' }, ticks: { color: '#6B7A8B' }, min: 0, max: 1.05 }
+                x: {
+                    type: 'linear',
+                    min: ANALYSIS_CONFIG.filterLowHz,
+                    max: ANALYSIS_CONFIG.psdMaxHz,
+                    grid: { color: '#E9EDF2' },
+                    ticks: { color: '#6B7A8B' },
+                    title: { display: true, text: 'Frequência (Hz)', color: '#6B7A8B' }
+                },
+                y: {
+                    grid: { color: '#E9EDF2' },
+                    ticks: { color: '#6B7A8B' },
+                    min: 0,
+                    title: { display: true, text: 'PSD (g²/Hz)', color: '#6B7A8B' }
+                }
             }
         },
-        data: { labels: [], datasets: [] }
+        data: { datasets: [] }
     });
 }
 
@@ -308,7 +353,7 @@ function processDataPacket(ts, ax, ay, az, fx, fy, fz) {
         pendingFilt.fz.shift();
     }
 
-    const rms = Math.sqrt((fx * fx + fy * fy + fz * fz) / 3);
+    const rms = Math.sqrt(fx * fx + fy * fy + fz * fz);
     document.getElementById('liveRMS').innerHTML =
         `${rms.toFixed(3)} <span style="font-size:16px;">g</span>`;
     setRing('liveRMSRing', (rms / 0.15) * 100, rms >= 0.15 ? 'var(--red-500)' : 'var(--blue-500)');
@@ -685,274 +730,281 @@ function updateRawCountBadge() {
 // ======================================================================
 //  CORE SIGNAL PROCESSING (mesmo código, com sessionId e UPDRS)
 // ======================================================================
+function integratePSD(freqs, psd, low, high) {
+    if (!freqs || freqs.length < 2 || !psd || psd.length !== freqs.length) return 0;
+    let area = 0;
+    for (let i = 1; i < freqs.length; i++) {
+        const f0 = freqs[i - 1], f1 = freqs[i];
+        if (f1 <= low || f0 >= high || f1 <= f0) continue;
+        const a = Math.max(f0, low);
+        const b = Math.min(f1, high);
+        if (b <= a) continue;
+        const p0 = psd[i - 1], p1 = psd[i];
+        const pa = p0 + (p1 - p0) * ((a - f0) / (f1 - f0));
+        const pb = p0 + (p1 - p0) * ((b - f0) / (f1 - f0));
+        area += 0.5 * (pa + pb) * (b - a);
+    }
+    return Math.max(0, area);
+}
+
+function weightedCentroid(freqs, psd, low, high) {
+    if (!freqs || freqs.length < 2) return 0;
+    let num = 0, den = 0;
+    for (let i = 1; i < freqs.length; i++) {
+        const f0 = freqs[i - 1], f1 = freqs[i];
+        if (f1 <= low || f0 >= high || f1 <= f0) continue;
+        const a = Math.max(f0, low), b = Math.min(f1, high);
+        if (b <= a) continue;
+        const p0 = psd[i - 1], p1 = psd[i];
+        const pa = p0 + (p1 - p0) * ((a - f0) / (f1 - f0));
+        const pb = p0 + (p1 - p0) * ((b - f0) / (f1 - f0));
+        const da = 0.5 * (pa + pb) * (b - a);
+        num += 0.5 * (a * pa + b * pb) * (b - a);
+        den += da;
+    }
+    return den > 0 ? num / den : 0;
+}
+
+function meanOf(arr) {
+    return arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
+}
+
+function detrendMean(arr) {
+    const m = meanOf(arr);
+    return arr.map(v => v - m);
+}
+
+function computeWelchPSD3D(filtX, filtY, filtZ, fs) {
+    const cfg = ANALYSIS_CONFIG;
+    const N = filtX.length;
+    const segLen = cfg.nperseg;
+    const step = segLen - cfg.noverlap;
+    if (N < segLen) {
+        throw new Error(`A sessão precisa de pelo menos ${cfg.minDurationSec.toFixed(0)} s (${segLen} amostras) para a análise espectral padronizada.`);
+    }
+
+    const nfft = Math.max(cfg.nfft, segLen);
+    const half = Math.floor(nfft / 2);
+    const window = new Float64Array(segLen);
+    let sumW2 = 0;
+    for (let i = 0; i < segLen; i++) {
+        const w = 0.5 * (1 - Math.cos((2 * Math.PI * i) / (segLen - 1)));
+        window[i] = w;
+        sumW2 += w * w;
+    }
+
+    const sumPsd = new Float64Array(half + 1);
+    let nSegs = 0;
+
+    for (let start = 0; start + segLen <= N; start += step) {
+        const x = detrendMean(filtX.slice(start, start + segLen));
+        const y = detrendMean(filtY.slice(start, start + segLen));
+        const z = detrendMean(filtZ.slice(start, start + segLen));
+        const realX = new Float32Array(nfft), imagX = new Float32Array(nfft);
+        const realY = new Float32Array(nfft), imagY = new Float32Array(nfft);
+        const realZ = new Float32Array(nfft), imagZ = new Float32Array(nfft);
+
+        for (let i = 0; i < segLen; i++) {
+            realX[i] = x[i] * window[i];
+            realY[i] = y[i] * window[i];
+            realZ[i] = z[i] * window[i];
+        }
+
+        fftRadix2(realX, imagX);
+        fftRadix2(realY, imagY);
+        fftRadix2(realZ, imagZ);
+
+        for (let k = 0; k <= half; k++) {
+            const f = k * fs / nfft;
+            if (f > cfg.psdMaxHz) break;
+            const px = realX[k] * realX[k] + imagX[k] * imagX[k];
+            const py = realY[k] * realY[k] + imagY[k] * imagY[k];
+            const pz = realZ[k] * realZ[k] + imagZ[k] * imagZ[k];
+            let p = (px + py + pz) / (fs * sumW2);
+            if (k > 0 && k < half) p *= 2; // espectro unilateral
+            sumPsd[k] += p;
+        }
+        nSegs++;
+    }
+
+    const freqs = [];
+    const psd = [];
+    for (let k = 0; k <= half; k++) {
+        const f = k * fs / nfft;
+        if (f < cfg.filterLowHz || f > cfg.psdMaxHz) continue;
+        freqs.push(f);
+        psd.push(sumPsd[k] / Math.max(1, nSegs));
+    }
+
+    // A média de periodogramas é a estimativa de Welch. O valor abaixo
+    // representa a energia espectral triaxial total, em g²/Hz.
+    const totalPower = integratePSD(freqs, psd, cfg.filterLowHz, cfg.filterHighHz);
+    const tremorPower = integratePSD(freqs, psd, cfg.tremorLowHz, cfg.tremorHighHz);
+    const relativeTremorPower = totalPower > 0 ? 100 * tremorPower / totalPower : 0;
+    const tremorRms = Math.sqrt(Math.max(0, tremorPower));
+
+    let peakFreq = 0, peakPower = -Infinity;
+    for (let i = 0; i < freqs.length; i++) {
+        if (freqs[i] < cfg.tremorLowHz || freqs[i] > cfg.tremorHighHz) continue;
+        if (psd[i] > peakPower) {
+            peakPower = psd[i];
+            peakFreq = freqs[i];
+        }
+    }
+
+    const centroid = weightedCentroid(freqs, psd, cfg.tremorLowHz, cfg.tremorHighHz);
+    const totalCentroid = weightedCentroid(freqs, psd, cfg.filterLowHz, cfg.filterHighHz);
+
+    function sumPowerNear(freq) {
+        const width = Math.max(0.5, 2 * (freqs[1] - freqs[0]));
+        return integratePSD(freqs, psd, Math.max(cfg.filterLowHz, freq - width), Math.min(cfg.psdMaxHz, freq + width));
+    }
+    const fundamentalPower = peakFreq > 0 ? sumPowerNear(peakFreq) : 0;
+    const secondHarmonicPower = peakFreq > 0 ? sumPowerNear(2 * peakFreq) : 0;
+    const thirdHarmonicPower = peakFreq > 0 ? sumPowerNear(3 * peakFreq) : 0;
+    const harmonicRatio = fundamentalPower > 0 && (secondHarmonicPower + thirdHarmonicPower) > 0
+        ? fundamentalPower / (secondHarmonicPower + thirdHarmonicPower)
+        : null;
+
+    const psdArea = totalPower > 0 ? totalPower : 1;
+    const psdNormArea = psd.map(p => p / psdArea);
+
+    return {
+        freqs,
+        psd,
+        psdNormArea,
+        nSegs,
+        segLen,
+        nfft,
+        df: fs / nfft,
+        totalPower,
+        tremorPower,
+        tremorRms,
+        relativeTremorPower,
+        peakFreq,
+        centroid,
+        totalCentroid,
+        harmonicRatio
+    };
+}
+
 function processSessionData(sessionId) {
     const patId = document.getElementById('patientId').value.trim() || 'NÃO IDENTIFICADO';
     const task = document.getElementById('taskSelect').value;
     const side = document.getElementById('sideSelect').value;
     const updrs = parseFloat(document.getElementById('updrsInput').value) || 0;
 
-    const t0 = recordBuffer[0][0];
-    const tN = recordBuffer[recordBuffer.length - 1][0];
-    const durationSec = Math.max(0.1, (tN - t0) / 1000);
-    const fs = recordBuffer.length / durationSec;
+    if (!recordBuffer || recordBuffer.length < ANALYSIS_CONFIG.nperseg) {
+        alert(`Dados insuficientes. Grave pelo menos ${ANALYSIS_CONFIG.minDurationSec} s para obter uma PSD de Welch padronizada.`);
+        return;
+    }
 
-    const filtX = recordBuffer.map(r => r[4]);
-    const filtY = recordBuffer.map(r => r[5]);
-    const filtZ = recordBuffer.map(r => r[6]);
+    const t0 = Number(recordBuffer[0][0]);
+    const tN = Number(recordBuffer[recordBuffer.length - 1][0]);
+    const durationSec = Math.max(0.1, (tN - t0) / 1000);
+    const fs = (recordBuffer.length - 1) / durationSec;
+    const fsDeviationPct = 100 * Math.abs(fs - ANALYSIS_CONFIG.expectedFsHz) / ANALYSIS_CONFIG.expectedFsHz;
+
+    const filtX = recordBuffer.map(r => Number(r[4]) || 0);
+    const filtY = recordBuffer.map(r => Number(r[5]) || 0);
+    const filtZ = recordBuffer.map(r => Number(r[6]) || 0);
 
     _lastFiltX = filtX;
     _lastFiltY = filtY;
     _lastFiltZ = filtZ;
     _lastFs = fs;
 
-    const filtMag = filtX.map((_, i) => Math.sqrt(filtX[i]**2 + filtY[i]**2 + filtZ[i]**2));
-    const meanMag = filtMag.reduce((a,b)=>a+b,0)/filtMag.length;
-    const acMag = filtMag.map(v => v - meanMag);
+    // Os dados filtrados já chegam do firmware. Não há refiltragem aqui.
+    const meanX = meanOf(filtX), meanY = meanOf(filtY), meanZ = meanOf(filtZ);
+    const acX = filtX.map(v => v - meanX);
+    const acY = filtY.map(v => v - meanY);
+    const acZ = filtZ.map(v => v - meanZ);
+    const vectorMag = acX.map((_, i) => Math.sqrt(acX[i]**2 + acY[i]**2 + acZ[i]**2));
+    const rmsVal = Math.sqrt(meanOf(vectorMag.map(v => v*v)));
+    const madVal = meanOf(vectorMag.map(v => Math.abs(v - meanOf(vectorMag))));
 
-    const rmsVal = Math.sqrt(acMag.reduce((s,v)=>s+v*v,0)/acMag.length);
-    const meanFilt = acMag.reduce((a,b)=>a+b,0)/acMag.length;
-    const madVal = acMag.reduce((a,b)=>a+Math.abs(b-meanFilt),0)/acMag.length;
-    const rawX = recordBuffer.map(r=>r[1]);
-    const rawY = recordBuffer.map(r=>r[2]);
-    const rawZ = recordBuffer.map(r=>r[3]);
+    const rawX = recordBuffer.map(r=>Number(r[1]) || 0);
+    const rawY = recordBuffer.map(r=>Number(r[2]) || 0);
+    const rawZ = recordBuffer.map(r=>Number(r[3]) || 0);
     const rawMag = rawX.map((_,i)=>Math.sqrt(rawX[i]**2+rawY[i]**2+rawZ[i]**2));
-    const meanRaw = rawMag.reduce((a,b)=>a+b,0)/rawMag.length;
+    const meanRaw = meanOf(rawMag);
     const enmoVal = Math.max(0, meanRaw - 1.0);
 
-    const envelope = acMag.map(v=>Math.abs(v));
-    const meanEnv = envelope.reduce((a,b)=>a+b,0)/envelope.length;
-    const stdEnv = Math.sqrt(envelope.reduce((s,v)=>s+(v-meanEnv)**2,0)/envelope.length);
-    const variab = meanEnv>0 ? (stdEnv/meanEnv)*100 : 0;
-
-    const sortedMag = [...acMag].sort((a,b)=>a-b);
-    const medianMag = sortedMag[Math.floor(sortedMag.length/2)];
-    const madMag = acMag.reduce((s,v)=>s+Math.abs(v-medianMag),0)/acMag.length;
+    const envelope = vectorMag;
+    const meanEnv = meanOf(envelope);
+    const stdEnv = Math.sqrt(meanOf(envelope.map(v => (v-meanEnv)**2)));
+    const variab = meanEnv > 0 ? (stdEnv/meanEnv)*100 : 0;
+    const medianMag = [...vectorMag].sort((a,b)=>a-b)[Math.floor(vectorMag.length/2)] || 0;
+    const madMag = meanOf(vectorMag.map(v=>Math.abs(v-medianMag)));
     const dynamicThreshold = Math.max(0.02, 2*madMag);
-    const onTime = (acMag.filter(v=>Math.abs(v)>dynamicThreshold).length/acMag.length)*100;
+    const onTime = meanOf(vectorMag.map(v => v > dynamicThreshold ? 1 : 0))*100;
 
-    const segLen = Math.min(256, Math.floor(recordBuffer.length/4));
-    const overlap = Math.floor(segLen*0.5);
-    const nSegs = Math.max(1, Math.floor((recordBuffer.length - overlap)/(segLen - overlap)));
-
-    let allPsd = [];
-    let allFreqs = [];
-
-    for (let s=0; s<nSegs; s++) {
-        const start = s*(segLen-overlap);
-        const end = Math.min(start+segLen, recordBuffer.length);
-        const segX = filtX.slice(start,end);
-        const segY = filtY.slice(start,end);
-        const segZ = filtZ.slice(start,end);
-        if (segX.length < 16) continue;
-
-        const N = segX.length;
-        const nFft = Math.pow(2, Math.ceil(Math.log2(N)));
-        const realX = new Float32Array(nFft), imagX = new Float32Array(nFft);
-        const realY = new Float32Array(nFft), imagY = new Float32Array(nFft);
-        const realZ = new Float32Array(nFft), imagZ = new Float32Array(nFft);
-        for (let i=0; i<N; i++) {
-            const win = 0.5*(1 - Math.cos((2*Math.PI*i)/(N-1)));
-            realX[i] = segX[i]*win;
-            realY[i] = segY[i]*win;
-            realZ[i] = segZ[i]*win;
-        }
-        fftRadix2(realX, imagX);
-        fftRadix2(realY, imagY);
-        fftRadix2(realZ, imagZ);
-
-        const half = nFft/2;
-        const psdSeg = [];
-        const freqSeg = [];
-        for (let i=1; i<half; i++) {
-            const f = i*(fs/nFft);
-            if (f>20) break;
-            const pwr = (realX[i]*realX[i] + imagX[i]*imagX[i] +
-                         realY[i]*realY[i] + imagY[i]*imagY[i] +
-                         realZ[i]*realZ[i] + imagZ[i]*imagZ[i]) / nFft;
-            psdSeg.push(pwr);
-            freqSeg.push(f);
-        }
-        if (allPsd.length===0) {
-            allPsd = psdSeg.map(()=>0);
-            allFreqs = freqSeg;
-        }
-        for (let i=0; i<psdSeg.length && i<allPsd.length; i++) {
-            allPsd[i] += psdSeg[i];
-        }
-    }
-
-    if (allPsd.length===0) {
-        alert('Não foi possível calcular o espectro. Dados insuficientes.');
+    let spectral;
+    try {
+        spectral = computeWelchPSD3D(filtX, filtY, filtZ, fs);
+    } catch (err) {
+        alert(err.message || 'Não foi possível calcular a PSD.');
         return;
     }
 
-    const denom = nSegs>0 ? nSegs : 1;
-    const psdRaw = allPsd.map(p => p/denom);   // PSD absoluta (média)
+    const {
+        freqs, psd, psdNormArea, nSegs, segLen, nfft, df,
+        totalPower, tremorPower, tremorRms, relativeTremorPower,
+        peakFreq, centroid, totalCentroid, harmonicRatio
+    } = spectral;
 
-    // Normalização para o gráfico (0..1) – mantida para médicos
-    let maxPwr = 0;
-    for (let i=0; i<psdRaw.length; i++) {
-        if (psdRaw[i] > maxPwr) maxPwr = psdRaw[i];
-    }
-    const psdNorm = maxPwr>0 ? psdRaw.map(p => p/maxPwr) : psdRaw;
-
-    // ---------- MÉTRICAS COM LIMIAR ----------
-    const TREMOR_THRESHOLD = 0.02; // g RMS
-    const isTremor = rmsVal >= TREMOR_THRESHOLD;
-
-    let peakFreq = 0, relPower = 0, centroid = 0, harmonicRatio = 0;
-
-    if (isTremor) {
-        // Encontra pico absoluto (usando PSD bruta)
-        const MIN_FREQ = 1.5;
-        let maxPwrPeak = 0;
-        for (let i=0; i<allFreqs.length; i++) {
-            if (allFreqs[i] < MIN_FREQ) continue;
-            if (psdRaw[i] > maxPwrPeak) {
-                maxPwrPeak = psdRaw[i];
-                peakFreq = allFreqs[i];
-            }
-        }
-        // Fallback: se nenhum pico acima de MIN_FREQ, usa o máximo geral
-        if (peakFreq===0) {
-            let fallbackMax = 0;
-            for (let i=0; i<allFreqs.length; i++) {
-                if (psdRaw[i] > fallbackMax) {
-                    fallbackMax = psdRaw[i];
-                    peakFreq = allFreqs[i];
-                }
-            }
-        }
-
-        // Potência relativa
-        let totalPow=0, bandPow=0;
-        for (let i=0; i<allFreqs.length; i++) {
-            const f = allFreqs[i];
-            totalPow += psdRaw[i];
-            if (f>=3 && f<=8) bandPow += psdRaw[i];
-        }
-        relPower = totalPow>0 ? (bandPow/totalPow)*100 : 0;
-
-        // Centroide
-        let weightedSum=0, powSum=0;
-        for (let i=0; i<allFreqs.length; i++) {
-            weightedSum += allFreqs[i]*psdRaw[i];
-            powSum += psdRaw[i];
-        }
-        centroid = powSum>0 ? weightedSum/powSum : 0;
-
-        // Razão harmônica
-        const df = allFreqs.length>1 ? allFreqs[1]-allFreqs[0] : 0.1;
-        const nBins=2, halfBand=nBins*df;
-        function sumPowerInBand(freq, freqs, psd) {
-            let sum=0;
-            const low=freq-halfBand, high=freq+halfBand;
-            for (let i=0; i<freqs.length; i++) {
-                if (freqs[i]>=low && freqs[i]<=high) sum+=psd[i];
-            }
-            return sum;
-        }
-        const fundPow = sumPowerInBand(peakFreq, allFreqs, psdRaw);
-        const harm2Pow = sumPowerInBand(2*peakFreq, allFreqs, psdRaw);
-        const harm3Pow = sumPowerInBand(3*peakFreq, allFreqs, psdRaw);
-        const harmPow = harm2Pow + harm3Pow;
-        harmonicRatio = fundPow>0 ? (fundPow/(harmPow+0.001)) : 0;
-    }
-
-    const dispEst = estimateDisplacement(filtMag, fs);
+    const isSpectrallyUsable = totalPower > 0 && tremorPower > 0;
+    const freqLabels = freqs.map(f => f.toFixed(3));
+    const samplingWarning = fsDeviationPct > ANALYSIS_CONFIG.fsWarnPct;
 
     // ---------- ATUALIZA UI ----------
     document.getElementById('repPatient').textContent = `Paciente: ${patId} (UPDRS: ${updrs})`;
     document.getElementById('repMeta').textContent =
-        `Tarefa: ${task} | Lado: ${side} | ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()} | ${durationSec.toFixed(1)}s`;
+        `Tarefa: ${task} | Lado: ${side} | ${durationSec.toFixed(1)} s | fs medido: ${fs.toFixed(2)} Hz | filtro recebido: ${ANALYSIS_CONFIG.filterLowHz}–${ANALYSIS_CONFIG.filterHighHz} Hz`;
 
-    // Métricas condicionais
-    document.getElementById('repDomFreq').innerHTML = isTremor
-        ? `${peakFreq.toFixed(1)} <span style="font-size:16px;">Hz</span>`
-        : '— <span style="font-size:14px;">(sinal fraco)</span>';
-
-    document.getElementById('repRelPower').innerHTML = isTremor
-        ? `${relPower.toFixed(1)} <span style="font-size:16px;">%</span>`
-        : '—';
-    setRing('repRelPowerRing', isTremor ? relPower : 0, relPower>60 ? 'var(--blue-700)' : 'var(--blue-500)');
-
-    document.getElementById('repCentroid').innerHTML = isTremor
-        ? `${centroid.toFixed(1)} <span style="font-size:16px;">Hz</span>`
-        : '—';
-    document.getElementById('repHarmonic').textContent = isTremor ? harmonicRatio.toFixed(2) : '—';
-
-    document.getElementById('repRMS').innerHTML = `${rmsVal.toFixed(3)} <span style="font-size:14px;">g</span>`;
+    document.getElementById('repDomFreq').innerHTML = isSpectrallyUsable
+        ? `${peakFreq.toFixed(2)} <span style="font-size:16px;">Hz</span>` : '—';
+    document.getElementById('repRelPower').innerHTML = isSpectrallyUsable
+        ? `${relativeTremorPower.toFixed(1)} <span style="font-size:14px;">%</span>` : '—';
+    setRing('repRelPowerRing', isSpectrallyUsable ? relativeTremorPower : 0,
+        relativeTremorPower > 50 ? 'var(--blue-700)' : 'var(--blue-500)');
+    document.getElementById('repCentroid').innerHTML = isSpectrallyUsable
+        ? `${centroid.toFixed(2)} <span style="font-size:16px;">Hz</span>` : '—';
+    document.getElementById('repHarmonic').textContent = harmonicRatio == null ? '—' : harmonicRatio.toFixed(2);
+    const bandPowerEl = document.getElementById('repBandPower');
+    if (bandPowerEl) bandPowerEl.innerHTML = `${tremorPower.toFixed(6)} <span style="font-size:13px;">g²</span>`;
+    document.getElementById('repRMS').innerHTML = `${tremorRms.toFixed(4)} <span style="font-size:14px;">g</span>`;
     document.getElementById('repVariability').innerHTML = `${variab.toFixed(1)} <span style="font-size:14px;">%</span>`;
-    document.getElementById('repOnTime').innerHTML = `${onTime.toFixed(1)} <span style="font-size:14px;">%</span> (limiar dinâmico: ${dynamicThreshold.toFixed(3)} g)`;
+    document.getElementById('repOnTime').innerHTML = `${onTime.toFixed(1)} <span style="font-size:14px;">%</span>`;
 
-    // Interpretação clínica
-    let interpret = '';
-    if (!isTremor) {
-        interpret = `<div style="color:var(--gray-600);">
-            <strong>⚠️ Sinal de baixa amplitude</strong><br>
-            O RMS do sinal filtrado (${rmsVal.toFixed(3)} g) está abaixo do limiar de detecção (0.02 g). 
-            A frequência dominante e a potência relativa não são confiáveis.
-        </div>`;
-    } else {
-        let freqLabel = '';
-        if (task === 'Rest') {
-            freqLabel = (peakFreq >= 3.5 && peakFreq <= 6.5) ? 'parkinsoniano (repouso)' :
-                        (peakFreq >= 6.5 && peakFreq <= 12) ? 'tremor essencial atípico' : 'atípico';
-        } else if (task === 'Postural' || task === 'Kinetic' || task === 'Intentional') {
-            freqLabel = (peakFreq >= 6.5 && peakFreq <= 12) ? 'tremor essencial (ação)' :
-                        (peakFreq >= 3.5 && peakFreq <= 6.5) ? 'parkinsoniano atípico' : 'atípico';
-        } else {
-            freqLabel = (peakFreq >= 3.5 && peakFreq <= 6.5) ? 'parkinsoniano' :
-                        (peakFreq >= 6.5 && peakFreq <= 12) ? 'tremor essencial' : 'atípico';
-        }
-        const severity = rmsVal < 0.05 ? 'leve' : (rmsVal < 0.15 ? 'moderado' : 'grave');
-        const severityColor = severity === 'leve' ? 'badge-mild' : (severity === 'moderado' ? 'badge-moderate' : 'badge-severe');
-
-        interpret = `
-        <div style="display:flex;flex-wrap:wrap;gap:12px;margin-bottom:8px;">
-          <span class="badge-clinical ${severityColor}">${severity.toUpperCase()} amplitude</span>
-          <span class="badge-clinical" style="background:var(--gray-200);color:var(--gray-700);">padrão ${freqLabel}</span>
-          <span class="badge-clinical" style="background:var(--surface-sunken);color:var(--ink-500);border:1px solid var(--border);">
-            ${relPower > 60 ? 'Alta especificidade em 3–8Hz' : 'Banda larga'}
-          </span>
+    let interpret = `
+        <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;">
+          <span class="badge-clinical" style="background:var(--blue-100);color:var(--blue-700);">ANÁLISE QUANTITATIVA</span>
+          <span class="badge-clinical" style="background:var(--gray-200);color:var(--gray-700);">Welch ${segLen} amostras / 50% overlap</span>
+          <span class="badge-clinical" style="background:var(--surface-sunken);color:var(--ink-500);border:1px solid var(--border);">Δf = ${df.toFixed(3)} Hz</span>
         </div>
         <div>
-          <strong>Frequência dominante</strong> ${peakFreq.toFixed(1)} Hz 
-          com ${relPower.toFixed(1)}% da potência na banda de 3–8 Hz. 
-          ${relPower > 65 ? 'Este padrão é consistente com tremor de repouso parkinsoniano.' : 
-            relPower > 40 ? 'Conteúdo de frequência mista — considerar tremor essencial ou tremor fisiológico exacerbado.' : 
-            'Baixa especificidade — pode refletir movimento voluntário ou tremor de baixa amplitude.'}
-          ${harmonicRatio > 1.8 ? 'Estrutura harmônica proeminente sugere oscilação sinusoidal.' : 'Baixa razão harmônica — forma de onda menos sinusoidal.'}
-          ${variab > 40 ? '⚠️ Alta variabilidade de amplitude — pode indicar tremor intermitente ou reemergente.' : 'A amplitude está relativamente estável ao longo da gravação.'}
-          <br><small style="color:var(--ink-400);">Tarefa: ${task} | Lado: ${side} | UPDRS: ${updrs}</small>
-        </div>
-        `;
-    }
+          <strong>Potência de tremor 3–7 Hz:</strong> ${tremorPower.toFixed(6)} g²<br>
+          <strong>RMS de tremor 3–7 Hz:</strong> ${tremorRms.toFixed(4)} g<br>
+          <strong>Frequência dominante 3–7 Hz:</strong> ${isSpectrallyUsable ? peakFreq.toFixed(2) + ' Hz' : 'não determinada'}<br>
+          <strong>Potência relativa 3–7 Hz:</strong> ${relativeTremorPower.toFixed(1)}% da potência ${ANALYSIS_CONFIG.filterLowHz}–${ANALYSIS_CONFIG.filterHighHz} Hz.
+          ${samplingWarning ? `<br><span style="color:var(--red-600);"><strong>⚠️ Atenção:</strong> fs medido difere ${fsDeviationPct.toFixed(1)}% do esperado (${ANALYSIS_CONFIG.expectedFsHz} Hz). Verifique o timestamp/firmware antes de comparar sessões.</span>` : ''}
+          <br><small style="color:var(--ink-400);">Estas métricas descrevem o sinal medido e não constituem diagnóstico ou classificação de gravidade clínica.</small>
+        </div>`;
     document.getElementById('interpretText').innerHTML = interpret;
 
-
-    // ---------- GRÁFICO PSD (MAGNITUDE ABSOLUTA) ----------
-    const freqLabels = allFreqs.map(f => f.toFixed(1));
-    psdChart.data.labels = freqLabels;
-    psdChart.data.datasets[0].data = psdRaw;                     // ← usa a PSD absoluta
-    psdChart.data.datasets[0].label = 'PSD (g²/Hz)';            // ← atualiza o rótulo
-    psdChart.options.scales.y.title.text = 'PSD (g²/Hz)';       // ← título do eixo
-    psdChart.options.scales.y.min = 0;                          // mantém mínimo zero
-    delete psdChart.options.scales.y.max;                       // remove o máximo fixo
-
-    // Linha da frequência dominante – só se houver tremor (isTremor)
-    if (psdChart.options.plugins && psdChart.options.plugins.annotation &&
-        psdChart.options.plugins.annotation.annotations &&
-        psdChart.options.plugins.annotation.annotations.domLine) {
-        if (isTremor && peakFreq > 0) {
-            psdChart.options.plugins.annotation.annotations.domLine.xMin = peakFreq;
-            psdChart.options.plugins.annotation.annotations.domLine.xMax = peakFreq;
-            psdChart.options.plugins.annotation.annotations.domLine.display = true;
-        } else {
-            psdChart.options.plugins.annotation.annotations.domLine.display = false;
-        }
-}
-    psdChart.update();    
+    // ---------- GRÁFICO PSD ABSOLUTA ----------
+    psdChart.data.datasets[0].data = freqs.map((f, i) => ({x: f, y: psd[i]}));
+    psdChart.data.datasets[0].label = 'PSD triaxial — Welch';
+    psdChart.options.scales.y.title.text = 'PSD (g²/Hz)';
+    psdChart.options.scales.x.min = ANALYSIS_CONFIG.filterLowHz;
+    psdChart.options.scales.x.max = ANALYSIS_CONFIG.psdMaxHz;
+    if (psdChart.options.plugins?.annotation?.annotations?.domLine) {
+        psdChart.options.plugins.annotation.annotations.domLine.xMin = peakFreq || ANALYSIS_CONFIG.tremorLowHz;
+        psdChart.options.plugins.annotation.annotations.domLine.xMax = peakFreq || ANALYSIS_CONFIG.tremorLowHz;
+        psdChart.options.plugins.annotation.annotations.domLine.display = isSpectrallyUsable;
+    }
+    psdChart.update();
 
     resizeSpectrogram();
     renderSpectrogram(filtX, filtY, filtZ, fs);
@@ -960,25 +1012,40 @@ function processSessionData(sessionId) {
     // ---------- SALVA SESSÃO ----------
     const sessionRecord = {
         id: sessionId,
+        analysisVersion: ANALYSIS_VERSION,
         patientId: patId,
         task,
         side,
-        updrs: updrs,
+        updrs,
         date: new Date().toLocaleDateString() + ' ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         duration: durationSec.toFixed(1),
-        domFreq: isTremor ? peakFreq.toFixed(1) : '—',
-        relPower: isTremor ? relPower.toFixed(1) : '—',
-        centroid: isTremor ? centroid.toFixed(1) : '—',
-        harmonic: isTremor ? harmonicRatio.toFixed(2) : '—',
-        rms: rmsVal.toFixed(3),
+        fs: fs.toFixed(3),
+        fsExpected: ANALYSIS_CONFIG.expectedFsHz,
+        fsDeviationPct: fsDeviationPct.toFixed(2),
+        filterLowHz: ANALYSIS_CONFIG.filterLowHz,
+        filterHighHz: ANALYSIS_CONFIG.filterHighHz,
+        tremorLowHz: ANALYSIS_CONFIG.tremorLowHz,
+        tremorHighHz: ANALYSIS_CONFIG.tremorHighHz,
+        nperseg: segLen,
+        noverlap: ANALYSIS_CONFIG.noverlap,
+        nfft,
+        df: df.toFixed(5),
+        domFreq: isSpectrallyUsable ? peakFreq.toFixed(2) : '—',
+        tremorPower: tremorPower.toFixed(8),
+        tremorRMS: tremorRms.toFixed(5),
+        relPower: isSpectrallyUsable ? relativeTremorPower.toFixed(2) : '—',
+        centroid: isSpectrallyUsable ? centroid.toFixed(2) : '—',
+        totalCentroid: totalCentroid.toFixed(2),
+        harmonic: harmonicRatio == null ? '—' : harmonicRatio.toFixed(3),
+        rms: rmsVal.toFixed(5),
         variability: variab.toFixed(1),
         onTime: onTime.toFixed(1),
-        mad: madVal.toFixed(3),
-        enmo: enmoVal.toFixed(3),
-        disp: dispEst.toFixed(2),
+        mad: madVal.toFixed(5),
+        enmo: enmoVal.toFixed(5),
         freqs: freqLabels,
-        psd: psdNorm,          // normalizado (para compatibilidade)
-        psdRaw: psdRaw,        // PSD absoluta (para futuras exportações)
+        psdDensity: psd,
+        psdNormArea,
+        psd: psd, // novo significado: PSD absoluta; mantido para compatibilidade com exportações
         hasRaw: true
     };
 
@@ -990,7 +1057,6 @@ function processSessionData(sessionId) {
         console.warn('Erro ao salvar no localStorage:', e);
     }
     renderSessionTable();
-
     switchTab('report');
 }
 
@@ -1338,39 +1404,55 @@ function renderComparison() {
     if (selected.length === 0) { alert('Selecione pelo menos uma sessão.'); return; }
 
     const colors = ['#1E7BAD', '#C43A44', '#86929E', '#4FA8DA', '#E0636B', '#172230'];
-    compareChart.data.datasets = selected.map((s, i) => ({
-        label: `${s.patientId} ${s.task}`,
-        data: s.psd || [],
+    const spectral = selected.filter(s => s.analysisVersion === ANALYSIS_VERSION && Array.isArray(s.psdDensity) && Array.isArray(s.freqs));
+    const legacy = selected.length - spectral.length;
+
+    compareChart.data.datasets = spectral.map((s, i) => ({
+        label: `${s.patientId} • ${s.task}`,
+        data: s.freqs.map((f, k) => ({ x: Number(f), y: Number(s.psdDensity[k]) })),
         borderColor: colors[i % colors.length],
         borderWidth: 2,
-        pointRadius: 0
+        pointRadius: 0,
+        tension: 0
     }));
-    compareChart.data.labels = selected[0].freqs || [];
     compareChart.update();
 
     const mHeader = document.getElementById('matrixHeader');
     const mBody = document.getElementById('matrixBody');
     mHeader.innerHTML = '<th>Métrica</th>' + selected.map(s =>
-        `<th>${s.patientId}<br><small>${s.task}</small></th>`).join('');
+        `<th>${s.patientId}<br><small>${s.task}${s.analysisVersion === ANALYSIS_VERSION ? '' : ' · legado'}</small></th>`).join('');
 
     const rows = [
         { name: 'UPDRS', key: 'updrs' },
-        { name: 'Freq. Dom. (Hz)', key: 'domFreq' },
-        { name: 'Potência 3–8Hz (%)', key: 'relPower' },
-        { name: 'Centroide (Hz)', key: 'centroid' },
-        { name: 'Razão Harmônica', key: 'harmonic' },
-        { name: 'RMS (g)', key: 'rms' },
-        { name: 'Variabilidade (%)', key: 'variability' },
-        { name: 'Tremor-ativo (%)', key: 'onTime' },
+        { name: 'Freq. dominante 3–7 Hz (Hz)', key: 'domFreq' },
+        { name: 'Potência de tremor 3–7 Hz (g²)', key: 'tremorPower' },
+        { name: 'RMS de tremor 3–7 Hz (g)', key: 'tremorRMS' },
+        { name: 'Potência relativa 3–7 Hz (%)', key: 'relPower' },
+        { name: 'Centroide 3–7 Hz (Hz)', key: 'centroid' },
+        { name: 'Razão harmônica', key: 'harmonic' },
+        { name: 'RMS total filtrado 1,5–15 Hz (g)', key: 'rms' },
+        { name: 'Variabilidade do envelope (%)', key: 'variability' },
+        { name: 'Atividade acima do limiar (%)', key: 'onTime' },
         { name: 'MAD (g)', key: 'mad' },
         { name: 'ENMO (g)', key: 'enmo' },
-        { name: 'Desloc. (mm)', key: 'disp' }
+        { name: 'fs medido (Hz)', key: 'fs' }
     ];
 
     mBody.innerHTML = rows.map(r =>
         `<tr><td style="font-weight:600;color:var(--text-muted);">${r.name}</td>
      ${selected.map(s => `<td>${s[r.key] !== undefined ? s[r.key] : '—'}</td>`).join('')}</tr>`
     ).join('');
+
+    if (legacy > 0) {
+        const warning = document.getElementById('comparisonWarning');
+        if (warning) {
+            warning.textContent = `${legacy} sessão(ões) legadas não foram incluídas na sobreposição de PSD. Elas usam uma versão anterior da análise e não são quantitativamente comparáveis à PSD Welch atual.`;
+            warning.classList.remove('hidden');
+        }
+    } else {
+        const warning = document.getElementById('comparisonWarning');
+        if (warning) warning.classList.add('hidden');
+    }
 }
 
 // ======================================================================
@@ -1381,43 +1463,48 @@ async function exportExcel() {
     const selected = savedSessions.filter(s => ids.includes(s.id));
     if (selected.length === 0) { alert('Selecione pelo menos uma sessão.'); return; }
 
-    // Aba 1: Resumo
     const summaryRows = selected.map(s => ({
         'ID': s.id,
+        'Versão da análise': s.analysisVersion || 'legado',
         'Paciente': s.patientId,
         'Tarefa': s.task,
         'Lado': s.side || '',
         'UPDRS': s.updrs || 0,
         'Data': s.date,
         'Duração (s)': s.duration,
-        'Freq. Dominante (Hz)': s.domFreq,
-        'Potência 3-8Hz (%)': s.relPower,
-        'Centroide (Hz)': s.centroid,
-        'Razão Harmônica': s.harmonic,
-        'RMS (g)': s.rms,
+        'fs medido (Hz)': s.fs || '',
+        'fs esperado (Hz)': s.fsExpected || '',
+        'Desvio fs (%)': s.fsDeviationPct || '',
+        'Filtro recebido (Hz)': `${s.filterLowHz ?? ''}-${s.filterHighHz ?? ''}`,
+        'Banda tremor (Hz)': `${s.tremorLowHz ?? ''}-${s.tremorHighHz ?? ''}`,
+        'Freq. dominante 3-7 Hz (Hz)': s.domFreq,
+        'Potência tremor 3-7 Hz (g²)': s.tremorPower,
+        'RMS tremor 3-7 Hz (g)': s.tremorRMS,
+        'Potência relativa 3-7 Hz (%)': s.relPower,
+        'Centroide 3-7 Hz (Hz)': s.centroid,
+        'Centroide 1,5-15 Hz (Hz)': s.totalCentroid,
+        'Razão harmônica': s.harmonic,
+        'RMS total filtrado 1,5-15 Hz (g)': s.rms,
         'Variabilidade (%)': s.variability,
-        'Tremor-ativo (%)': s.onTime,
+        'Atividade acima do limiar (%)': s.onTime,
         'MAD (g)': s.mad,
-        'ENMO (g)': s.enmo,
-        'Desloc. (mm)': s.disp
+        'ENMO (g)': s.enmo
     }));
 
-    // Aba 2: Espectros
-    const maxLen = Math.max(...selected.map(s => (s.psd || []).length));
+    const spectral = selected.filter(s => s.analysisVersion === ANALYSIS_VERSION && Array.isArray(s.psdDensity));
+    const maxLen = Math.max(0, ...spectral.map(s => s.psdDensity.length));
     const specRows = [];
     for (let i = 0; i < maxLen; i++) {
-        const row = { 'Freq. (Hz)': selected[0]?.freqs?.[i] || '' };
-        selected.forEach(s => {
-            row[`${s.patientId} (${s.task})`] = s.psd?.[i] ?? '';
+        const row = { 'Freq. (Hz)': spectral[0]?.freqs?.[i] ?? '' };
+        spectral.forEach(s => {
+            row[`${s.patientId} (${s.task}) PSD (g²/Hz)`] = s.psdDensity?.[i] ?? '';
         });
         specRows.push(row);
     }
 
     const wb = XLSX.utils.book_new();
-    const ws1 = XLSX.utils.json_to_sheet(summaryRows);
-    XLSX.utils.book_append_sheet(wb, ws1, 'Resumo');
-    const ws2 = XLSX.utils.json_to_sheet(specRows);
-    XLSX.utils.book_append_sheet(wb, ws2, 'Espectros');
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(summaryRows), 'Resumo');
+    if (specRows.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(specRows), 'PSD Welch');
 
     const wbout = XLSX.write(wb, { bookType: 'xlsx', type: 'array' });
     const blob = new Blob([wbout], { type: 'application/octet-stream' });

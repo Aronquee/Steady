@@ -7,7 +7,7 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>STEADY – Sistema de Análise de Tremor v3.0 (Exportação)</title>
+    <title>STEADY – Sistema de Análise de Tremor v4.0 (PSD Welch)</title>
 
     <!-- Chart.js, plugin de anotação, html2canvas e SheetJS -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js">
@@ -724,17 +724,17 @@
             </div>
             <h4>📊 Principais métricas</h4>
             <ul class="grid-metrics">
-                <li><strong>RMS (g)</strong><span>Amplitude global do tremor (3–12 Hz).</span></li>
+                <li><strong>RMS tremor (g)</strong><span>RMS obtido da potência espectral na banda de 3–7 Hz.</span></li>
                 <li><strong>ENMO (g)</strong><span>Intensidade do movimento global.</span></li>
-                <li><strong>Frequência Dominante (Hz)</strong><span>Pico espectral; 3,5–6,5 Hz → parkinsoniano; 6,5–12 Hz → essencial.</span></li>
-                <li><strong>Potência Relativa 3–8 Hz (%)</strong><span>Especificidade parkinsoniana.</span></li>
+                <li><strong>Frequência dominante (Hz)</strong><span>Pico espectral restrito à banda de tremor 3–7 Hz.</span></li>
+                <li><strong>Potência relativa 3–7 Hz (%)</strong><span>Proporção da potência de tremor em relação à potência recebida de 1,5–15 Hz.</span></li>
                 <li><strong>Centroide Espectral (Hz)</strong><span>Centro de massa da distribuição.</span></li>
-                <li><strong>Razão Harmônica</strong><span>&gt; 1,8 sugere oscilação sinusoidal pura.</span></li>
-                <li><strong>Variabilidade de Amplitude (%)</strong><span>&gt; 40% → tremor intermitente.</span></li>
-                <li><strong>Tremor‑ativo (%)</strong><span>Percentual acima do limiar.</span></li>
+                <li><strong>Razão harmônica</strong><span>Relação entre potência fundamental e segunda/terceira harmônicas; sem limiar clínico fixo.</span></li>
+                <li><strong>Variabilidade de amplitude (%)</strong><span>CV do envelope; descritor quantitativo, sem classificação clínica automática.</span></li>
+                <li><strong>Atividade acima do limiar (%)</strong><span>Medida operacional de atividade do sinal, não um diagnóstico.</span></li>
             </ul>
             <h4>🧭 Interpretação integrada</h4>
-            <p style="font-size:14px; color: var(--text-muted);">Classifica o padrão como parkinsoniano, tremor essencial, atípico ou baixa amplitude, com gravidade (leve, moderada, grave).</p>
+            <p style="font-size:14px; color: var(--text-muted);">Apresenta métricas quantitativas do sinal. Não classifica automaticamente Parkinson, tremor essencial ou gravidade clínica.</p>
             <div class="disclaimer">⚠️ <strong>Nota clínica:</strong> Ferramenta auxiliar. Decisões são de responsabilidade do médico.</div>
             <button class="btn-close-modal" id="closeOnboardingBtn">Entendi. Iniciar o sistema →</button>
         </div>
@@ -816,14 +816,14 @@
         <div id="tab-live" class="tab-content">
             <div class="grid-4" style="margin-bottom:20px;">
                 <div class="card metric-card">
-                    <div class="card-title">Tremor RMS (3–12 Hz)</div>
+                    <div class="card-title">RMS triaxial filtrado</div>
                     <div class="metric-row">
                         <div class="ring" id="liveRMSRing" style="--pct:0; --ring-color:var(--blue-500);">
                             <div class="ring-hole"></div>
                         </div>
                         <div>
                             <div class="metric-val" id="liveRMS">0,000 <span style="font-size:15px;">g</span></div>
-                            <div class="metric-sub">Amplitude limitada em banda</div>
+                            <div class="metric-sub">Sinal recebido do firmware · 1,5–15 Hz</div>
                         </div>
                     </div>
                 </div>
@@ -835,7 +835,7 @@
                 <div class="card">
                     <div class="card-title">MAD ao Vivo (filtrado)</div>
                     <div class="metric-val" id="liveMAD">0,000 <span style="font-size:16px;">g</span></div>
-                    <div class="metric-sub">Desvio de Amplitude Médio (3–12 Hz)</div>
+                    <div class="metric-sub">Desvio médio do sinal recebido</div>
                 </div>
                 <div class="card">
                     <div class="card-title">Amostras no Buffer</div>
@@ -853,7 +853,7 @@
                 </div>
                 <div class="card">
                     <div class="chart-header">
-                        <h3>Filtrado 3–12 Hz</h3>
+                        <h3>Filtrado recebido · 1,5–15 Hz</h3>
                         <select id="yScaleSelect" onchange="updateFilteredScale()" style="padding:2px 8px;font-size:12px;">
                             <option value="0.1">±0,10 g</option>
                             <option value="0.25" selected>±0,25 g</option>
@@ -887,35 +887,40 @@
                             <div class="metric-sub">Pico de potência espectral</div>
                         </div>
                         <div class="card" style="background:var(--surface-sunken);">
-                            <div class="card-title">Potência Rel. 3–8 Hz</div>
+                            <div class="card-title">Potência Rel. 3–7 Hz</div>
                             <div class="metric-row">
                                 <div class="ring ring-sm" id="repRelPowerRing" style="--pct:0; --ring-color:var(--blue-600); --ring-hole:var(--surface-sunken);">
                                     <div class="ring-hole"></div>
                                 </div>
                                 <div>
                                     <div class="metric-val" style="color:var(--primary-blue);font-size:22px;" id="repRelPower">-- <span style="font-size:14px;">%</span></div>
-                                    <div class="metric-sub">Especificidade parkinsoniana</div>
+                                    <div class="metric-sub">3–7 Hz / potência 1,5–15 Hz</div>
                                 </div>
                             </div>
                         </div>
                         <div class="card" style="background:var(--surface-sunken);">
                             <div class="card-title">Centroide Espectral</div>
                             <div class="metric-val" id="repCentroid">-- <span style="font-size:16px;">Hz</span></div>
-                            <div class="metric-sub">Centro de massa de frequência</div>
+                            <div class="metric-sub">Centroide dentro de 3–7 Hz</div>
                         </div>
                         <div class="card" style="background:var(--surface-sunken);">
                             <div class="card-title">Razão Harmônica</div>
                             <div class="metric-val" style="color:var(--accent-purple);" id="repHarmonic">--</div>
-                            <div class="metric-sub">Potência fundamental-para-harmônica</div>
+                            <div class="metric-sub">Fundamental / 2ª + 3ª harmônicas</div>
                         </div>
                     </div>
 
                     <!-- Métricas adicionais -->
-                    <div class="grid-3" style="margin-bottom:20px;">
+                    <div class="grid-4" style="margin-bottom:20px;">
                         <div class="card" style="background:var(--surface-sunken);">
-                            <div class="card-title">Tremor RMS (3–12 Hz)</div>
+                            <div class="card-title">Potência de tremor 3–7 Hz</div>
+                            <div class="metric-val" style="font-size:22px;color:var(--primary-blue);" id="repBandPower">-- <span style="font-size:13px;">g²</span></div>
+                            <div class="metric-sub">Integral da PSD de Welch</div>
+                        </div>
+                        <div class="card" style="background:var(--surface-sunken);">
+                            <div class="card-title">RMS de tremor 3–7 Hz</div>
                             <div class="metric-val" style="font-size:22px;color:var(--accent-green);" id="repRMS">-- <span style="font-size:14px;">g</span></div>
-                            <div class="metric-sub">Amplitude limitada em banda</div>
+                            <div class="metric-sub">√(potência integrada da banda 3–7 Hz)</div>
                         </div>
                         <div class="card" style="background:var(--surface-sunken);">
                             <div class="card-title">Variabilidade de Amplitude</div>
@@ -923,9 +928,9 @@
                             <div class="metric-sub">CV do envelope do tremor</div>
                         </div>
                         <div class="card" style="background:var(--surface-sunken);">
-                            <div class="card-title">Tremor‑ativo</div>
+                            <div class="card-title">Atividade acima do limiar</div>
                             <div class="metric-val" style="font-size:22px;color:var(--accent-amber);" id="repOnTime">-- <span style="font-size:14px;">%</span></div>
-                            <div class="metric-sub">Acima do limiar (0,05 g)</div>
+                            <div class="metric-sub">Limiar operacional dinâmico</div>
                         </div>
                     </div>
 
@@ -939,15 +944,15 @@
 
                     <!-- PSD -->
                     <div class="chart-header" style="margin-top:16px;">
-                        <h3>Densidade Espectral de Potência (Welch, normalizada – eixos combinados)</h3>
-                        <span style="font-size:12px;color:var(--text-muted);">Segmentos sobrepostos • 0–20 Hz</span>
+                        <h3>Densidade Espectral de Potência — Welch (triaxial)</h3>
+                        <span style="font-size:12px;color:var(--text-muted);">512 amostras • 50% overlap • janela Hann • 1,5–15 Hz</span>
                     </div>
                     <div class="chart-container tall"><canvas id="psdChart"></canvas></div>
 
                     <!-- Espectrograma -->
                     <div class="chart-header" style="margin-top:20px;">
                         <h3>Espectrograma (tempo‑frequência)</h3>
-                        <span style="font-size:12px;color:var(--text-muted);">Janela deslizante • cor = potência normalizada</span>
+                        <span style="font-size:12px;color:var(--text-muted);">Janela deslizante • potência relativa apenas para visualização</span>
                     </div>
                     <div class="spectro-wrapper" style="height:260px;">
                         <canvas id="spectrogramCanvas"></canvas>
@@ -971,7 +976,7 @@
                     </div>
                     <div style="max-height:350px;overflow-y:auto;">
                         <table>
-                            <thead><tr><th>Selecionar</th><th>Paciente</th><th>Tarefa</th><th>Freq.Dom</th><th>3–8Hz%</th><th>Data</th></tr></thead>
+                            <thead><tr><th>Selecionar</th><th>Paciente</th><th>Tarefa</th><th>Freq. 3–7Hz</th><th>Pot. 3–7Hz%</th><th>Data</th></tr></thead>
                             <tbody id="sessionTableBody"></tbody>
                         </table>
                     </div>
@@ -985,6 +990,7 @@
                 </div>
                 <div class="card">
                     <h3>Sobreposição de PSD</h3>
+                    <div id="comparisonWarning" class="interpret-box hidden" style="margin-top:10px;padding:10px;font-size:12px;"></div>
                     <div class="chart-container tall" style="margin-top:12px;"><canvas id="compareChart"></canvas></div>
                 </div>
             </div>
