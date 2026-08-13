@@ -1,228 +1,233 @@
-# Steady – Ferramenta Clínica para Avaliação de Tremor
+```markdown
+# Steady – Clinical Tremor Assessment Tool
 
-**Steady** é um sistema portátil para avaliação quantitativa do tremor. Combina um sensor vestível baseado em ESP32‑S3 com uma interface web autossuficiente, permitindo que médicos capturem, visualizem e analisem o tremor durante manobras padronizadas (repouso, postural, cinético).
+**Steady** is a portable system for quantitative tremor assessment. It combines an ESP32‑S3‑based wearable sensor with a self‑contained web interface, enabling clinicians to capture, visualize, and analyze tremor during standardized maneuvers (rest, postural, kinetic, intentional).
 
-O dispositivo transmite dados de acelerômetro brutos e filtrados (passa‑banda) em tempo real via Wi‑Fi. O painel HTML incluído fornece gráficos ao vivo, controle de gravação e um relatório offline abrangente com métricas espectrais e interpretação clínica — tudo sem a necessidade de instalar qualquer software além de um navegador moderno.
+The device transmits raw and filtered accelerometer data (band‑pass) in real time via Wi‑Fi (WebSocket) or **USB (Serial)**. The included HTML dashboard provides live charts, recording controls, and a comprehensive offline report with spectral metrics and quantitative interpretation, plus a **local database** with **session comparison** and **advanced data export** for future research – all without installing any software beyond a modern browser.
 
 ---
 
-## Visão Geral do Sistema
+## System Overview
 
 ```
-┌──────────────────────────────────────────────────────────────┐
-│                 ESP32‑S3 (Sensor Vestível)                 │
-│  • Acelerômetro QMI8658 @ 250 Hz                          │
-│  • Filtro passa‑banda fixo 3–12 Hz (Butterworth ordem 4)  │
-│  • Display TFT: formas de onda rolantes + barra de amplitude│
-│  • Servidor WebSocket (modos AP + STA)                    │
-│  • Transmissão binária: timestamp, eixos brutos e filtrados│
-└───────────────────────────┬───────────────────────────────┘
-                            │ Wi‑Fi / WebSocket (frames de 28 bytes)
+┌────────────────────────────────────────────────────────────────┐
+│                 ESP32‑S3 (Wearable Sensor)                   │
+│  • QMI8658 Accelerometer @ 128 Hz                           │
+│  • Fixed band‑pass filter 1.5–15 Hz (Butterworth order 4)   │
+│  • TFT display: scrolling waveforms + amplitude bar         │
+│  • WebSocket server (AP + STA modes)                       │
+│  • Binary transmission via Wi‑Fi and **USB‑Serial**        │
+│  • Packet: 28 bytes (timestamp + 3 raw + 3 filtered)       │
+└───────────────────────────┬─────────────────────────────────┘
+                            │ Wi‑Fi / WebSocket or USB‑Serial
                             ▼
-┌─────────────────────────────────────────────────────────────┐
-│            Navegador Web (Frontend + Análise)              │
-│  • Gráficos ao vivo (brutos e filtrados)                  │
-│  • Controle de gravação e seleção de tarefa               │
-│  • Exportação CSV dos dados brutos                        │
-│  • PSD, espectrograma, frequência dominante (offline)     │
-│  • Métricas clínicas: RMS, variabilidade, tremor‑ativo,   │
-│    razão harmônica, potência relativa (3–8 Hz)            │
-│  • Texto interpretativo (parkinsoniano / essencial /      │
-│    padrão atípico, graduação de gravidade)                │
-│  • Banco de dados de sessões com ferramenta de comparação │
-└─────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                  Web Browser (Frontend + Analysis)             │
+│  • WebSocket or Web Serial (USB) connection                  │
+│  • Live charts (raw and filtered)                           │
+│  • Recording control, task selection, and UPDRS input       │
+│  • Raw data storage in **IndexedDB**                        │
+│  • Welch PSD (512 segments, 50% overlap, NFFT 1024)         │
+│  • Time‑frequency spectrogram                               │
+│  • Quantitative metrics (RMS, relative power,               │
+│    spectral centroid, harmonic ratio, variability,          │
+│    threshold‑crossing activity)                             │
+│  • Interpretive report with analysis badges                 │
+│  • Session database and **comparison** across sessions      │
+│  • Exports: PNG (report), Excel (summary + PSD),            │
+│    CSV (raw data)                                           │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
-O ESP32 atua como **front‑end de medição transparente** – não realiza classificação ou detecção de episódios. Toda a interpretação diagnóstica ocorre no navegador, utilizando técnicas consolidadas de processamento de sinais.
+The ESP32 acts as a **transparent measurement front‑end** – it does not perform classification or episode detection. All diagnostic interpretation occurs in the browser, using well‑established signal‑processing techniques.
 
 ---
 
-## Requisitos de Hardware
+## Hardware Requirements
 
-- **Placa:** Waveshare ESP32‑S3‑Touch‑LCD‑1.69 (display ST7789V2, touch CST816T, PMU AXP2101)
-- **IMU:** QMI8658 onboard (endereço I²C `0x6B`)
-- **Alimentação:** USB‑C ou bateria Li‑ion (gerenciada pelo AXP2101)
-- **Pinagem:** definida em `Config.h` – verifique com a revisão da sua placa antes de conectar.
-
----
-
-## Conteúdo do Repositório
-
-| Arquivo / Pasta | Descrição |
-|-----------------|-----------|
-| `steady_firmware.ino` | Sketch principal do Arduino (dual‑core FreeRTOS) |
-| `Config.h` | Mapeamento de pinos, coeficientes do filtro, credenciais Wi‑Fi |
-| `TremorSensor.h` / `QMI8658Sensor.cpp` | Abstração do IMU e driver |
-| `DSPPipeline.h/.cpp` | Cascata de biquad (Butterworth passa‑banda) + envelope |
-| `DisplayManager.h/.cpp` | Renderização de formas de onda no TFT |
-| `NetworkManager.h/.cpp` | Servidor WebSocket, transmissão binária, manipulação de comandos |
-| **`index.html`** | **Painel clínico – estrutura e design** (interface do usuário) |
-| **`script.js`** | **Lógica completa do painel** – conexão WebSocket, processamento de sinais, métricas, interpretação e banco de dados local |
-| `README.md` | Este documento |
+- **Board:** Waveshare ESP32‑S3‑Touch‑LCD‑1.69 (ST7789V2 display, CST816T touch, AXP2101 PMU)
+- **IMU:** Onboard QMI8658 (I²C address `0x6B`)
+- **Power:** USB‑C or Li‑ion battery (managed by AXP2101)
+- **Pinout:** defined in `Config.h` – verify against your board revision before wiring.
 
 ---
 
-## Configuração do Firmware
+## Repository Contents
+
+| File / Folder | Description |
+|---------------|-------------|
+| `steady_firmware.ino` | Main Arduino sketch (dual‑core FreeRTOS) |
+| `Config.h` | Pin mapping, filter coefficients, Wi‑Fi credentials |
+| `TremorSensor.h` / `QMI8658Sensor.cpp` | IMU abstraction and driver |
+| `DSPPipeline.h/.cpp` | Biquad cascade (Butterworth band‑pass 1.5–15 Hz) + envelope |
+| `DisplayManager.h/.cpp` | TFT waveform rendering |
+| `NetworkManager.h/.cpp` | WebSocket server, binary transmission, command handling |
+| **`index.html`** | **Clinical dashboard – structure and design** (UI) |
+| **`script.js`** | **Complete dashboard logic** – WebSocket/USB connection, signal processing, metrics, interpretation, local database, and exports |
+| `README.md` | This document |
+
+---
+
+## Firmware Setup
 
 ### 1. Configure `Config.h`
 
-- **Wi‑Fi:** Defina `WIFI_STA_SSID` e `WIFI_STA_PASSWORD` para sua rede. Se o modo STA falhar, o dispositivo entra em modo AP com SSID `Steady-Device`.
-- **Coeficientes do filtro:** Os coeficientes SOS pré‑calculados já foram validados com `scipy.signal.butter` – não os altere a menos que tenha recalibrado o filtro.
-- **Taxa de amostragem:** `SAMPLE_RATE_HZ = 250` (fixa; alterá‑la exige o recálculo do filtro).
+- **Wi‑Fi:** Set `WIFI_STA_SSID` and `WIFI_STA_PASSWORD` for your network. If STA mode fails, the device falls back to AP mode with SSID `Steady-Device` (password `steadyadmin`).
+- **Filter coefficients:** The pre‑computed SOS coefficients were validated with `scipy.signal.butter` for a **1.5–15 Hz** band, order 4, at 128 Hz – **do not change** them unless you have recalibrated the filter.
+- **Sampling rate:** `SAMPLE_RATE_HZ = 128` (fixed; changing it requires filter recalculation and updating the frontend analysis parameters).
 
-### 2. Instale as Bibliotecas Arduino Necessárias
+### 2. Install Required Arduino Libraries
 
-- `Arduino_GFX` (para o display)
-- `SensorQMI8658` (driver do IMU)
-- `WiFi` / `ESPmDNS` / `ESPAsyncWebServer` (nativas do núcleo ESP32)
+- `Arduino_GFX` (for the display)
+- `SensorQMI8658` (IMU driver)
+- `WiFi` / `ESPmDNS` / `ESPAsyncWebServer` (ESP32 core libraries)
 
-### 3. Compile e Carregue
+### 3. Compile and Upload
 
-Abra `steady_firmware.ino` na Arduino IDE (ou PlatformIO). Selecione a placa **ESP32S3 Dev Module** com as configurações USB/seriais apropriadas. Grave o firmware.
+Open `steady_firmware.ino` in the Arduino IDE (or PlatformIO). Select the **ESP32S3 Dev Module** board with the appropriate USB/serial settings. Flash the firmware.
 
-Após a inicialização, o dispositivo imprime seu endereço IP (ou SSID do AP) no monitor serial (`115200 baud`). O TFT mostrará uma mensagem de inicialização e, em seguida, começará a exibir as formas de onda filtradas em tempo real assim que os dados chegarem.
-
----
-
-## Utilizando o Painel Clínico
-
-### 1. Conecte‑se ao Dispositivo
-
-- **Modo STA Wi‑Fi:** Seu computador deve estar na mesma rede que o ESP32. Abra um navegador e acesse `http://steady.local` (mDNS) ou o endereço IP mostrado no monitor serial.
-- **Modo AP Wi‑Fi:** Conecte seu computador à rede `Steady-Device` (senha `steadyadmin`). Em seguida, acesse `http://192.168.4.1` (ou o IP do AP impresso no serial).
-
-### 2. Abra o `index.html`
-
-Basta abrir o arquivo `index.html` em qualquer navegador moderno (Chrome, Firefox, Edge). Nenhum servidor web é necessário – o arquivo funciona localmente.
-
-> **Separação de responsabilidades:**  
-> - `index.html` contém toda a estrutura HTML e os estilos CSS (design).  
-> - `script.js` concentra toda a lógica de conexão, processamento de sinais, atualização de gráficos, cálculos de métricas, interpretação clínica e gerenciamento do banco de dados local.
-
-### 3. Conecte‑se ao Sensor
-
-- Digite o endereço IP do ESP32 no campo (padrão `192.168.0.140`) e clique em **Conectar**.
-- O ponto de status fica verde e o botão **Iniciar Gravação** se torna ativo.
-
-### 4. Defina Paciente e Tarefa
-
-- Preencha o ID do paciente.
-- Escolha a tarefa (**Repouso**, **Postural**, **Cinético**, **Intencional**) e o lado afetado.
-- Esses campos são salvos junto com cada sessão de gravação.
-
-### 5. Gravando uma Sessão
-
-- Clique em **Iniciar Gravação** – o dispositivo começa a transmitir frames binários e o TFT mostra um indicador “REC”.
-- Realize a manobra clínica escolhida (ex.: braços apoiados no colo, braços estendidos, dedo‑nariz).
-- Clique em **Parar Gravação** – o navegador processa todo o buffer offline.
-- O painel muda automaticamente para a aba **Análise**, exibindo:
-  - Frequência dominante e potência relativa (3–8 Hz)
-  - Amplitude RMS, variabilidade e percentual de tremor‑ativo
-  - Gráfico de Densidade Espectral de Potência (PSD)
-  - Espectrograma (tempo‑frequência)
-  - Interpretação clínica (padrão e gravidade)
-
-### 6. Exportando Dados
-
-- **PNG:** Clique no botão **Exportar PNG** para salvar o relatório completo como imagem.
-- **Banco de dados de sessões:** Todas as sessões concluídas são armazenadas no `localStorage` do navegador. A aba **Comparar** permite selecionar múltiplas sessões e sobrepor suas curvas de PSD e métricas lado a lado.
+After startup, the device prints its IP address (or AP SSID) to the serial monitor (`115200 baud`). The TFT will show a boot message and then begin displaying real‑time filtered waveforms once data starts flowing.
 
 ---
 
-## Métricas Clínicas e Interpretação
+## Using the Clinical Dashboard
 
-| Métrica | Descrição |
-|---------|-----------|
-| **Frequência Dominante** | Pico do espectro de potência (eixos combinados). 3,5–6,5 Hz sugere tremor parkinsoniano; 6,5–12 Hz sugere tremor essencial. |
-| **Potência Relativa (3–8 Hz)** | Percentual da potência total dentro da faixa clássica parkinsoniana. Valores >65% reforçam a suspeita de tremor de repouso. |
-| **Tremor RMS** | Raiz quadrada da média dos quadrados do sinal filtrado (3–12 Hz), média entre os eixos. |
-| **Variabilidade de Amplitude** | Coeficiente de variação do envelope – valores >40% indicam tremor intermitente ou reemergente. |
-| **Tremor‑ativo (%)** | Fração do tempo em que o envelope excede 0,05 g – quantifica a persistência durante a manobra. |
-| **Razão Harmônica** | Razão entre a potência fundamental e a potência harmônica – >1,8 sugere oscilação sinusoidal rítmica. |
-| **Centroide Espectral** | “Centro de massa” do espectro de potência – reflete o conteúdo médio de frequência. |
+### 1. Connect to the Device
 
-O painel gera uma **interpretação textual** combinando essas métricas, com graduação de gravidade (leve / moderada / grave) e sugestão do padrão clínico mais provável (parkinsoniano, tremor essencial, atípico ou baixa amplitude).
+- **Wi‑Fi STA mode:** Your computer must be on the same network as the ESP32. Open a browser and go to `http://steady.local` (mDNS) or the IP address shown in the serial monitor.
+- **Wi‑Fi AP mode:** Connect your computer to the `Steady-Device` network (password `steadyadmin`). Then open `http://192.168.4.1` (or the AP IP printed on the serial).
 
----
+### 2. Open `index.html`
 
-## Personalizando o Filtro
+Simply open `index.html` in any modern browser (Chrome, Edge, Firefox). No web server is required – the file works locally.
 
-O filtro passa‑banda está definido em `Config.h` como uma cascata de seções de segunda ordem (SOS). Os coeficientes foram gerados usando `scipy.signal.butter(4, [3, 12], btype='band', fs=250, output='sos')`.
+> **Separation of concerns:**  
+> - `index.html` contains the full HTML structure and CSS styles (design).  
+> - `script.js` contains all the logic – connection (WebSocket and USB), signal processing, chart updates, metric calculations, quantitative interpretation, local database, and exports.
 
-Para alterar a banda passante ou a taxa de amostragem:
-1. Recalcule os coeficientes com Python / SciPy.
-2. Substitua a matriz `BANDPASS_SOS` em `Config.h`.
-3. Atualize `SAMPLE_RATE_HZ` e recompile.
+### 3. Connect to the Sensor
 
-> **Importante:** A análise no lado do navegador utiliza os dados brutos de aceleração (ax, ay, az) e recalcula o espectro de forma independente. As saídas filtradas do ESP (fx, fy, fz) são usadas apenas para exibição ao vivo e estimativa de RMS durante a gravação – o relatório final é baseado nos dados brutos para garantir consistência.
+- **Wi‑Fi:** Enter the ESP32’s IP address in the field (default `192.168.0.140`) and click **Connect WS**. The status dot turns green, and the **Start Recording** button becomes active.
+- **USB:** Click **Connect USB** – the browser will prompt you to select the ESP32’s serial port. Once connected, the USB status turns green, and recording becomes available (independent of Wi‑Fi). All data received over the serial port is processed identically to WebSocket data.
 
----
+### 4. Set Patient, UPDRS, and Task
 
-## Lógica do Código – `script.js`
+- Fill in the patient ID and the UPDRS score (Part IV, optional).
+- Choose the task (**Rest**, **Postural**, **Kinetic**, **Intentional**) and the affected side.
+- These fields are saved with every recording session.
 
-O arquivo `script.js` implementa todo o processamento no lado do cliente. Seu fluxo principal é:
+### 5. Recording a Session
 
-1. **Conexão WebSocket**  
-   - Estabelece um WebSocket binário com o ESP32.  
-   - Recebe frames de 28 bytes (timestamp, ax, ay, az, fx, fy, fz).  
-   - Acumula os pontos em buffers circulares para os gráficos ao vivo.
+- Click **Start Recording** – the device begins streaming frames, and the TFT shows a “REC” indicator.
+- Perform the chosen clinical maneuver (e.g., arms resting on lap, arms extended, finger‑to‑nose).
+- Click **Stop Recording** – the browser stores the **raw data** in IndexedDB (for future research) and processes the entire buffer offline.
+- The dashboard automatically switches to the **Analysis** tab, displaying:
+  - Dominant frequency (within the 2–9 Hz operational band)
+  - Relative power 2–9 Hz and band RMS
+  - Spectral centroid and harmonic ratio
+  - Amplitude variability and threshold‑crossing activity
+  - Power Spectral Density (Welch) plot
+  - Time‑frequency spectrogram
+  - Quantitative signal interpretation (without automatic diagnostic classification)
 
-2. **Gravação**  
-   - Quando o usuário inicia a gravação, todos os frames recebidos são armazenados em `recordBuffer`.  
-   - Ao parar, o buffer é processado offline.
+### 6. Exporting Data
 
-3. **Processamento do Sinal (offline)**  
-   - **Magnitude combinada** dos eixos filtrados.  
-   - **Métricas de amplitude**: RMS, MAD, ENMO, variabilidade (CV do envelope), tremor‑ativo (threshold de 0,05 g).  
-   - **Estimativa de deslocamento** via dupla integração com deriva removida.  
-   - **PSD (Welch)**: segmentação com janela de Hanning, FFT radix‑2 (implementada em JS), média dos segmentos e normalização.  
-   - **Frequência dominante** e potência relativa na banda 3–8 Hz.  
-   - **Centroide espectral** e **razão harmônica** (fundamental vs. 2ª e 3ª harmônicas).  
-   - **Espectrograma**: janelas deslizantes, FFT por coluna, exibição com mapa de cores “inferno”.  
-   - **Interpretação clínica** baseada em regras heurísticas (frequência, tarefa, métricas).
-
-4. **Atualização da Interface**  
-   - Preenche os cartões de métricas, os gráficos PSD e o espectrograma.  
-   - Exibe o texto interpretativo com badges de gravidade e padrão.
-
-5. **Banco de Dados Local**  
-   - Cada sessão é salva no `localStorage` como objeto JSON.  
-   - A aba **Comparar** permite selecionar sessões e sobrepor as PSDs, além de exibir uma matriz comparativa de métricas.
-
-6. **Exportação**  
-   - Utiliza `html2canvas` para capturar o relatório e gerar um PNG.
-
-Todas as funções de processamento (FFT, PSD, espectrograma) são implementadas em JavaScript puro, sem dependências externas além do Chart.js e do plugin de anotação.
+- **PNG:** Click **Export PNG** to save the full report as an image.
+- **Session database:** All completed sessions are stored in the browser’s `localStorage` (metadata) and IndexedDB (raw data). The **Database & Comparison** tab allows you to:
+  - Select multiple sessions to overlay their PSD curves
+  - Display a side‑by‑side comparison matrix of metrics
+  - **Export processed data (.xlsx):** includes a summary sheet with all metrics and a second sheet with the PSDs (for statistical analysis)
+  - **Export raw data (.csv):** all axes (ax, ay, az, fx, fy, fz) for the selected sessions, for external validation
+  - **Delete raw data** from selected sessions (saves IndexedDB space while keeping metadata for comparison)
 
 ---
 
-## Solução de Problemas
+## Clinical Metrics and Interpretation
 
-| Sintoma | Causa Provável | Solução |
-|---------|----------------|---------|
-| TFT permanece em branco | Mapeamento de pinos incorreto | Verifique `PIN_TFT_*` em `Config.h` conforme sua placa. |
-| IMU não detectado | Endereço I²C ou fiação | Confirme `QMI8658_I2C_ADDR` (0x6B). Verifique os pinos SDA/SCL. |
-| Falha na conexão WebSocket | Firewall ou IP incompatível | Certifique‑se de que computador e ESP estão na mesma sub‑rede. Use o modo AP se necessário. |
-| Sem forma de onda no painel | Dados não estão sendo transmitidos | Verifique se o ESP está enviando frames (debug serial). Certifique‑se de que o navegador suporta WebSocket binário. |
-| Espectrograma não aparece | Duração da gravação insuficiente | Grave pelo menos 5 segundos de movimento. |
+| Metric | Description |
+|--------|-------------|
+| **Dominant Frequency (2–9 Hz)** | Peak of the power spectrum within the operational band, obtained via Welch’s method. |
+| **Relative Power (2–9 Hz)** | Percentage of total power (1.5–15 Hz) concentrated in the 2–9 Hz band. |
+| **Band RMS (2–9 Hz)** | Square root of the integrated power in the 2–9 Hz band – a tremor amplitude measure. |
+| **Filtered Signal RMS (1.5–15 Hz)** | Square root of the total power of the received filtered signal (triaxial). |
+| **Spectral Centroid (2–9 Hz)** | “Center of mass” of the spectral distribution within the 2–9 Hz band. |
+| **Harmonic Ratio** | Ratio of the fundamental frequency power to the sum of the 2nd and 3rd harmonic powers. |
+| **Amplitude Variability (%)** | Coefficient of variation of the filtered signal envelope – describes amplitude regularity. |
+| **Threshold‑Crossing Activity (%)** | Fraction of time the envelope exceeds an adaptive threshold (2× MAD) – a measure of tremor persistence. |
 
----
-
-## Aprimoramentos Futuros (Pós‑MVP)
-
-- Suporte ao IMU **BNO085** (já abstraído via interface `ITremorSensor`)
-- **Espectrograma ao vivo** dentro do painel HTML (atualização em tempo real)
-- **Sincronização em nuvem** para colaboração multi‑site
-- Conectividade **BLE** como alternativa ao Wi‑Fi
+The dashboard generates a **textual interpretation** combining these metrics, with severity grading (mild / moderate / severe) based purely on quantitative rules, **without replacing clinical judgment**.
 
 ---
 
-## Licença
+## Customizing the Filter
 
-Este projeto é fornecido para fins de pesquisa e avaliação clínica. **Não é um dispositivo médico certificado.** Todo o uso é por conta e risco do usuário. Os autores não assumem responsabilidade por decisões clínicas baseadas na saída deste sistema.
+The band‑pass filter is defined in `Config.h` as a cascade of second‑order sections (SOS). Coefficients were generated using `scipy.signal.butter(4, [1.5, 15], btype='band', fs=128, output='sos')`.
+
+To change the passband or sampling rate:
+1. Recompute the coefficients with Python / SciPy.
+2. Replace the `BANDPASS_SOS` array in `Config.h`.
+3. Update `SAMPLE_RATE_HZ` and recompile.
+4. **In the frontend**, also adjust `ANALYSIS_CONFIG.expectedFsHz` and the analysis bands (`signalBand`, `tremorBand`) to maintain consistency.
+
+> **Important:** The browser‑side analysis uses the raw acceleration data (ax, ay, az) and recomputes the spectrum independently. The ESP’s filtered outputs (fx, fy, fz) are used only for live display and RMS estimation during recording – the final report is based on raw data to ensure consistency.
 
 ---
 
-## Créditos
+## Code Logic – `script.js`
 
-Desenvolvido como parte de uma iniciativa de pesquisa em engenharia biomédica. O design de hardware é baseado na placa Waveshare ESP32‑S3‑Touch‑LCD‑1.69. Os conceitos de processamento de sinais são derivados da literatura consolidada sobre análise de tremor.
+The `script.js` file implements all client‑side processing. Its main flow is:
+
+1. **Connection**  
+   - Establishes a binary WebSocket with the ESP32 **or** a Web Serial (USB) connection.  
+   - Receives 28‑byte frames (timestamp, ax, ay, az, fx, fy, fz).  
+   - Accumulates points in circular buffers for live charts.
+
+2. **Recording**  
+   - When the user starts recording, all incoming frames are stored in `recordBuffer`.  
+   - When stopped, the buffer is **saved to IndexedDB** (raw data) and processed offline.
+
+3. **Signal Processing (offline)**  
+   - **Combined magnitude** of the filtered axes.  
+   - **Amplitude metrics**: total RMS, MAD, ENMO, variability (CV of envelope), threshold‑crossing activity (based on adaptive MAD threshold).  
+   - **Displacement estimation** via double integration with drift removal (for qualitative analysis).  
+   - **PSD (Welch)**: segmentation with Hanning window (512 samples, 50% overlap), radix‑2 FFT (NFFT 1024), segment averaging, and normalization.  
+   - **Dominant frequency** and relative power in the 2–9 Hz band.  
+   - **Spectral centroid** and **harmonic ratio** (fundamental vs. 2nd and 3rd harmonics).  
+   - **Spectrogram**: sliding windows, column‑wise FFT, “inferno” colormap, and dominant‑frequency curve overlay.  
+   - **Quantitative interpretation** based on heuristic rules (frequency, relative power, variability, etc.), with severity badges.
+
+4. **UI Updates**  
+   - Fills metric cards, PSD chart, and spectrogram.  
+   - Displays the interpretive text with quantitative analysis badges.
+
+5. **Local Database**  
+   - Each session is saved in `localStorage` (metadata) and **IndexedDB** (raw data).  
+   - The **Compare** tab allows session selection, PSD overlay, metric comparison matrix, and batch data export.
+
+6. **Export**  
+   - Uses `html2canvas` to capture the report and generate a PNG.  
+   - Uses `SheetJS` (XLSX) to export summary and PSDs.  
+   - Generates CSV with all raw axes for the selected sessions.
+
+All processing functions (FFT, PSD, spectrogram) are implemented in pure JavaScript, with minimal external dependencies (Chart.js, html2canvas, SheetJS).
+
+---
+
+## Troubleshooting
+
+| Symptom | Probable Cause | Solution |
+|---------|----------------|----------|
+| TFT stays blank | Incorrect pin mapping | Verify `PIN_TFT_*` in `Config.h` against your board. |
+| IMU not detected | Wrong I²C address or wiring | Confirm `QMI8658_I2C_ADDR` (0x6B). Check SDA/SCL pins. |
+| WebSocket connection fails | Firewall or IP mismatch | Ensure computer and ESP are on the same subnet. Use AP mode if needed. |
+| No waveform in dashboard | Data not being transmitted | Check that the ESP is sending frames (serial debug). Ensure browser supports binary WebSocket or Web Serial. |
+| Spectrogram not showing | Insufficient recording duration | Record at least 5 seconds of movement for adequate resolution. |
+| Excel/CSV export fails | Raw data missing in IndexedDB | Older sessions may lack raw data. Use the processed export (Excel) to obtain PSDs. |
+| USB connection fails | Browser lacks Web Serial API support | Use Chrome or Edge. Verify the serial driver is installed. |
+
+---
+
+## Credits
+
+Developed as part of a biomedical engineering research initiative. The hardware design is based on the Waveshare ESP32‑S3‑Touch‑LCD‑1.69 board. Signal‑processing concepts are derived from established tremor‑analysis literature.
+```
