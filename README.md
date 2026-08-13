@@ -1,4 +1,3 @@
-```markdown
 # Steady – Clinical Tremor Assessment Tool
 
 **Steady** is a portable system for quantitative tremor assessment. It combines an ESP32‑S3‑based wearable sensor with a self‑contained web interface, enabling clinicians to capture, visualize, and analyze tremor during standardized maneuvers (rest, postural, kinetic, intentional).
@@ -230,4 +229,4 @@ All processing functions (FFT, PSD, spectrogram) are implemented in pure JavaScr
 ## Credits
 
 Developed as part of a biomedical engineering research initiative. The hardware design is based on the Waveshare ESP32‑S3‑Touch‑LCD‑1.69 board. Signal‑processing concepts are derived from established tremor‑analysis literature.
-```
+
