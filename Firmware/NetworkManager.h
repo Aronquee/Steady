@@ -26,8 +26,19 @@ class SteadyNetworkManager {
   // Packs and sends one 28-byte binary frame (see roadmap sec 1.3) to
   // all connected clients. No-op if not recording or nobody's
   // connected — this is the only thing sent at sample rate.
+  static constexpr size_t SN_MAX_BATCH = 16;
+
+  // Packs and sends one 28-byte binary frame (see roadmap sec 1.3) to
+  // all connected clients. No-op if not recording or nobody's
+  // connected — this is the only thing sent at sample rate.
   void streamSample(const ProcessedData &data);
 
+  // Batched version: packs up to SN_MAX_BATCH samples (28 bytes each,
+  // back-to-back) into ONE WebSocket binary frame instead of one frame
+  // per sample. Cuts 802.11 airtime overhead at high sample rates.
+  // ⚠️ Changes the wire format — the PC-side WS client must be updated
+  // to split each incoming frame into 28-byte chunks.
+  void streamBatch(const ProcessedData *data, size_t count);
   void setRecording(bool state) { _recording = state; }
   bool isRecording() const { return _recording; }
 

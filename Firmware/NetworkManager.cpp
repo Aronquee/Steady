@@ -151,11 +151,7 @@ void SteadyNetworkManager::sendTestMessage() {
 }
 
 // ---- Binary sample streaming ----
-void SteadyNetworkManager::streamSample(const ProcessedData &data) {
-  //if (!_recording || ws.count() == 0) return;
-  if (ws.count() == 0) return;
-
-  uint8_t buf[28];
+static void packSample(uint8_t *buf, const ProcessedData &data) {
   memcpy(buf,      &data.timestamp_ms, 4);
   memcpy(buf + 4,  &data.raw_ax, 4);
   memcpy(buf + 8,  &data.raw_ay, 4);
@@ -163,6 +159,25 @@ void SteadyNetworkManager::streamSample(const ProcessedData &data) {
   memcpy(buf + 16, &data.fx, 4);
   memcpy(buf + 20, &data.fy, 4);
   memcpy(buf + 24, &data.fz, 4);
+}
+
+void SteadyNetworkManager::streamSample(const ProcessedData &data) {
+  //if (!_recording || ws.count() == 0) return;
+  if (ws.count() == 0) return;
+
+  uint8_t buf[28];
+  packSample(buf, data);
   ws.binaryAll(buf, sizeof(buf));
+}
+
+void SteadyNetworkManager::streamBatch(const ProcessedData *data, size_t count) {
+  if (ws.count() == 0 || count == 0) return;
+
+  uint8_t buf[28 * SN_MAX_BATCH];
+  size_t n = (count > SN_MAX_BATCH) ? SN_MAX_BATCH : count;
+  for (size_t i = 0; i < n; i++) {
+    packSample(buf + i * 28, data[i]);
+  }
+  ws.binaryAll(buf, n * 28);
 }
 

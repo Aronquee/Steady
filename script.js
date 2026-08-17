@@ -260,7 +260,7 @@ function initCharts() {
                 borderColor: '#1E7BAD',
                 backgroundColor: 'rgba(30,123,173,0.10)',
                 fill: true,
-                borderWidth: 2,
+                borderWidth: 1,
                 pointRadius: 0,
                 tension: 0
             }]
@@ -443,18 +443,29 @@ function connectWS() {
     };
 
     ws.onmessage = (evt) => {
-        if (evt.data.byteLength === 28) {
-            const dv = new DataView(evt.data);
-            const ts = dv.getUint32(0, true);
-            const ax = dv.getFloat32(4, true),
-                ay = dv.getFloat32(8, true),
-                az = dv.getFloat32(12, true);
-            const fx = dv.getFloat32(16, true),
-                fy = dv.getFloat32(20, true),
-                fz = dv.getFloat32(24, true);
+        const PACKET_SIZE = 28;
+        const byteLength = evt.data.byteLength;
+
+        // Aceita 1 pacote (comportamento antigo) OU N pacotes concatenados
+        // (batching do firmware — Fix #2b).
+        if (byteLength % PACKET_SIZE !== 0) return;
+
+        const dv = new DataView(evt.data);
+        const packetCount = byteLength / PACKET_SIZE;
+
+        for (let i = 0; i < packetCount; i++) {
+            const offset = i * PACKET_SIZE;
+            const ts = dv.getUint32(offset + 0, true);
+            const ax = dv.getFloat32(offset + 4, true);
+            const ay = dv.getFloat32(offset + 8, true);
+            const az = dv.getFloat32(offset + 12, true);
+            const fx = dv.getFloat32(offset + 16, true);
+            const fy = dv.getFloat32(offset + 20, true);
+            const fz = dv.getFloat32(offset + 24, true);
+
             processDataPacket(ts, ax, ay, az, fx, fy, fz);
         }
-    };
+        };
 }
 
 // ======================================================================
