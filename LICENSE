@@ -1,13 +1,19 @@
-Copyright (c) 2026 [Matheus Aronque e Silva - UFABC]
+Copyright (c) 2026 Matheus Aronque e Silva. All rights reserved.
 
-Todos os direitos reservados.
+This software is provided "as is", without warranty of any kind, express or
+implied, including but not limited to the warranties of merchantability,
+fitness for a particular purpose, and noninfringement.
 
-Este software é fornecido "como está", sem garantias de qualquer tipo. 
-O código-fonte neste repositório é disponibilizado exclusivamente para fins de 
-consulta e avaliação. É expressamente proibido:
+The source code in this repository is made available strictly for reference
+and evaluation purposes. Unless you have received prior written permission
+from the copyright holder, you may NOT:
 
-- Copiar, modificar, distribuir ou sublicenciar o código sem autorização prévia por escrito.
-- Utilizar o código para fins comerciais.
-- Criar trabalhos derivados sem permissão explícita.
+- Copy, modify, distribute, or sublicense this code, in whole or in part.
+- Use this code, or any derivative of it, for commercial purposes.
+- Create derivative works based on this code.
 
-Para solicitar licenciamento ou permissões, entre em contato: aronque@hotmail.com
+In no event shall the copyright holder be liable for any claim, damages, or
+other liability arising from, out of, or in connection with the software or
+the use or other dealings in the software.
+
+To request licensing or usage permissions, contact: aronque@hotmail.com
